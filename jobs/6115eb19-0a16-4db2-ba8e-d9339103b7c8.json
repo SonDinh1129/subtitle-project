@@ -1,0 +1,1994 @@
+{
+  "job_id": "6115eb19-0a16-4db2-ba8e-d9339103b7c8",
+  "filename": "video_test.mp4",
+  "status": "done",
+  "progress": 100,
+  "translation_mode": "segment",
+  "video_path": "uploads\\6115eb19-0a16-4db2-ba8e-d9339103b7c8_video_test.mp4",
+  "created_at": 1773670496.0108871,
+  "error": null,
+  "english_words": [
+    {
+      "end": 11.86,
+      "segment_id": 0,
+      "start": 10.46,
+      "word": "Wow."
+    },
+    {
+      "end": 13.18,
+      "segment_id": 1,
+      "start": 13.02,
+      "word": "What"
+    },
+    {
+      "end": 13.28,
+      "segment_id": 1,
+      "start": 13.18,
+      "word": "an"
+    },
+    {
+      "end": 13.6,
+      "segment_id": 1,
+      "start": 13.28,
+      "word": "audience,"
+    },
+    {
+      "end": 14.58,
+      "segment_id": 1,
+      "start": 13.78,
+      "word": "but"
+    },
+    {
+      "end": 14.7,
+      "segment_id": 1,
+      "start": 14.58,
+      "word": "if"
+    },
+    {
+      "end": 14.78,
+      "segment_id": 1,
+      "start": 14.7,
+      "word": "I'm"
+    },
+    {
+      "end": 14.88,
+      "segment_id": 1,
+      "start": 14.78,
+      "word": "being"
+    },
+    {
+      "end": 15.22,
+      "segment_id": 1,
+      "start": 14.88,
+      "word": "honest,"
+    },
+    {
+      "end": 15.84,
+      "segment_id": 1,
+      "start": 15.4,
+      "word": "I"
+    },
+    {
+      "end": 16.02,
+      "segment_id": 1,
+      "start": 15.84,
+      "word": "don't"
+    },
+    {
+      "end": 16.14,
+      "segment_id": 1,
+      "start": 16.02,
+      "word": "care"
+    },
+    {
+      "end": 16.28,
+      "segment_id": 1,
+      "start": 16.14,
+      "word": "what"
+    },
+    {
+      "end": 16.34,
+      "segment_id": 1,
+      "start": 16.28,
+      "word": "you"
+    },
+    {
+      "end": 16.52,
+      "segment_id": 1,
+      "start": 16.34,
+      "word": "think"
+    },
+    {
+      "end": 16.6,
+      "segment_id": 1,
+      "start": 16.52,
+      "word": "of"
+    },
+    {
+      "end": 16.68,
+      "segment_id": 1,
+      "start": 16.6,
+      "word": "my"
+    },
+    {
+      "end": 16.86,
+      "segment_id": 1,
+      "start": 16.68,
+      "word": "talk."
+    },
+    {
+      "end": 18.25,
+      "segment_id": 2,
+      "start": 18.11,
+      "word": "I"
+    },
+    {
+      "end": 18.49,
+      "segment_id": 2,
+      "start": 18.25,
+      "word": "don't."
+    },
+    {
+      "end": 19.07,
+      "segment_id": 2,
+      "start": 18.75,
+      "word": "I"
+    },
+    {
+      "end": 19.19,
+      "segment_id": 2,
+      "start": 19.07,
+      "word": "care"
+    },
+    {
+      "end": 19.29,
+      "segment_id": 2,
+      "start": 19.19,
+      "word": "what"
+    },
+    {
+      "end": 19.39,
+      "segment_id": 2,
+      "start": 19.29,
+      "word": "the"
+    },
+    {
+      "end": 19.61,
+      "segment_id": 2,
+      "start": 19.39,
+      "word": "internet"
+    },
+    {
+      "end": 19.89,
+      "segment_id": 2,
+      "start": 19.61,
+      "word": "thinks"
+    },
+    {
+      "end": 19.97,
+      "segment_id": 2,
+      "start": 19.89,
+      "word": "of"
+    },
+    {
+      "end": 20.11,
+      "segment_id": 2,
+      "start": 19.97,
+      "word": "my"
+    },
+    {
+      "end": 20.33,
+      "segment_id": 2,
+      "start": 20.11,
+      "word": "talk."
+    },
+    {
+      "end": 21.93,
+      "segment_id": 3,
+      "start": 21.79,
+      "word": "Because"
+    },
+    {
+      "end": 22.05,
+      "segment_id": 3,
+      "start": 21.93,
+      "word": "they're"
+    },
+    {
+      "end": 22.13,
+      "segment_id": 3,
+      "start": 22.05,
+      "word": "the"
+    },
+    {
+      "end": 22.35,
+      "segment_id": 3,
+      "start": 22.13,
+      "word": "ones"
+    },
+    {
+      "end": 22.51,
+      "segment_id": 3,
+      "start": 22.35,
+      "word": "who"
+    },
+    {
+      "end": 22.63,
+      "segment_id": 3,
+      "start": 22.51,
+      "word": "get"
+    },
+    {
+      "end": 22.71,
+      "segment_id": 3,
+      "start": 22.63,
+      "word": "it"
+    },
+    {
+      "end": 22.93,
+      "segment_id": 3,
+      "start": 22.71,
+      "word": "seen"
+    },
+    {
+      "end": 23.37,
+      "segment_id": 3,
+      "start": 22.93,
+      "word": "and"
+    },
+    {
+      "end": 23.51,
+      "segment_id": 3,
+      "start": 23.37,
+      "word": "get"
+    },
+    {
+      "end": 23.59,
+      "segment_id": 3,
+      "start": 23.51,
+      "word": "it"
+    },
+    {
+      "end": 23.85,
+      "segment_id": 3,
+      "start": 23.59,
+      "word": "shared."
+    },
+    {
+      "end": 24.51,
+      "segment_id": 3,
+      "start": 24.15,
+      "word": "And"
+    },
+    {
+      "end": 24.59,
+      "segment_id": 3,
+      "start": 24.51,
+      "word": "I"
+    },
+    {
+      "end": 24.77,
+      "segment_id": 3,
+      "start": 24.59,
+      "word": "think"
+    },
+    {
+      "end": 24.97,
+      "segment_id": 3,
+      "start": 24.77,
+      "word": "that's"
+    },
+    {
+      "end": 25.05,
+      "segment_id": 3,
+      "start": 24.97,
+      "word": "where"
+    },
+    {
+      "end": 25.25,
+      "segment_id": 3,
+      "start": 25.05,
+      "word": "most"
+    },
+    {
+      "end": 25.49,
+      "segment_id": 3,
+      "start": 25.25,
+      "word": "people"
+    },
+    {
+      "end": 25.65,
+      "segment_id": 3,
+      "start": 25.49,
+      "word": "get"
+    },
+    {
+      "end": 25.77,
+      "segment_id": 3,
+      "start": 25.65,
+      "word": "it"
+    },
+    {
+      "end": 25.99,
+      "segment_id": 3,
+      "start": 25.77,
+      "word": "wrong."
+    },
+    {
+      "end": 26.45,
+      "segment_id": 3,
+      "start": 26.13,
+      "word": "They're"
+    },
+    {
+      "end": 26.67,
+      "segment_id": 3,
+      "start": 26.45,
+      "word": "talking"
+    },
+    {
+      "end": 26.85,
+      "segment_id": 3,
+      "start": 26.67,
+      "word": "to"
+    },
+    {
+      "end": 26.99,
+      "segment_id": 3,
+      "start": 26.85,
+      "word": "you"
+    },
+    {
+      "end": 27.69,
+      "segment_id": 3,
+      "start": 26.99,
+      "word": "here."
+    },
+    {
+      "end": 28.9,
+      "segment_id": 4,
+      "start": 28.76,
+      "word": "Instead"
+    },
+    {
+      "end": 28.98,
+      "segment_id": 4,
+      "start": 28.9,
+      "word": "of"
+    },
+    {
+      "end": 29.16,
+      "segment_id": 4,
+      "start": 28.98,
+      "word": "talking"
+    },
+    {
+      "end": 29.32,
+      "segment_id": 4,
+      "start": 29.16,
+      "word": "to"
+    },
+    {
+      "end": 29.52,
+      "segment_id": 4,
+      "start": 29.32,
+      "word": "you,"
+    },
+    {
+      "end": 30.38,
+      "segment_id": 4,
+      "start": 29.62,
+      "word": "random"
+    },
+    {
+      "end": 31.08,
+      "segment_id": 4,
+      "start": 30.38,
+      "word": "person"
+    },
+    {
+      "end": 31.96,
+      "segment_id": 4,
+      "start": 31.08,
+      "word": "scrolling"
+    },
+    {
+      "end": 32.68,
+      "segment_id": 4,
+      "start": 31.96,
+      "word": "Facebook,"
+    },
+    {
+      "end": 34.55,
+      "segment_id": 5,
+      "start": 34.33,
+      "word": "Thanks"
+    },
+    {
+      "end": 34.65,
+      "segment_id": 5,
+      "start": 34.55,
+      "word": "for"
+    },
+    {
+      "end": 34.75,
+      "segment_id": 5,
+      "start": 34.65,
+      "word": "the"
+    },
+    {
+      "end": 34.95,
+      "segment_id": 5,
+      "start": 34.75,
+      "word": "click."
+    },
+    {
+      "end": 36.25,
+      "segment_id": 5,
+      "start": 35.85,
+      "word": "You"
+    },
+    {
+      "end": 36.43,
+      "segment_id": 5,
+      "start": 36.25,
+      "word": "see,"
+    },
+    {
+      "end": 36.67,
+      "segment_id": 5,
+      "start": 36.51,
+      "word": "back"
+    },
+    {
+      "end": 36.91,
+      "segment_id": 5,
+      "start": 36.67,
+      "word": "in"
+    },
+    {
+      "end": 37.59,
+      "segment_id": 5,
+      "start": 36.91,
+      "word": "2009,"
+    },
+    {
+      "end": 37.93,
+      "segment_id": 5,
+      "start": 37.79,
+      "word": "we"
+    },
+    {
+      "end": 38.05,
+      "segment_id": 5,
+      "start": 37.93,
+      "word": "all"
+    },
+    {
+      "end": 38.31,
+      "segment_id": 5,
+      "start": 38.05,
+      "word": "had"
+    },
+    {
+      "end": 38.49,
+      "segment_id": 5,
+      "start": 38.31,
+      "word": "these"
+    },
+    {
+      "end": 38.85,
+      "segment_id": 5,
+      "start": 38.49,
+      "word": "weird"
+    },
+    {
+      "end": 39.05,
+      "segment_id": 5,
+      "start": 38.85,
+      "word": "little"
+    },
+    {
+      "end": 39.41,
+      "segment_id": 5,
+      "start": 39.05,
+      "word": "things"
+    },
+    {
+      "end": 39.83,
+      "segment_id": 5,
+      "start": 39.41,
+      "word": "called"
+    },
+    {
+      "end": 40.51,
+      "segment_id": 5,
+      "start": 39.83,
+      "word": "attention"
+    },
+    {
+      "end": 40.99,
+      "segment_id": 5,
+      "start": 40.51,
+      "word": "spans."
+    },
+    {
+      "end": 42.5,
+      "segment_id": 6,
+      "start": 42.3,
+      "word": "Yeah,"
+    },
+    {
+      "end": 42.88,
+      "segment_id": 6,
+      "start": 42.54,
+      "word": "they're"
+    },
+    {
+      "end": 43.08,
+      "segment_id": 6,
+      "start": 42.88,
+      "word": "gone."
+    },
+    {
+      "end": 43.36,
+      "segment_id": 6,
+      "start": 43.16,
+      "word": "They're"
+    },
+    {
+      "end": 43.5,
+      "segment_id": 6,
+      "start": 43.36,
+      "word": "gone."
+    },
+    {
+      "end": 43.66,
+      "segment_id": 6,
+      "start": 43.56,
+      "word": "We"
+    },
+    {
+      "end": 43.88,
+      "segment_id": 6,
+      "start": 43.66,
+      "word": "killed"
+    },
+    {
+      "end": 44.02,
+      "segment_id": 6,
+      "start": 43.88,
+      "word": "them."
+    },
+    {
+      "end": 44.56,
+      "segment_id": 6,
+      "start": 44.16,
+      "word": "They're"
+    },
+    {
+      "end": 45.02,
+      "segment_id": 6,
+      "start": 44.56,
+      "word": "dead."
+    },
+    {
+      "end": 46.4,
+      "segment_id": 7,
+      "start": 46.24,
+      "word": "I'm"
+    },
+    {
+      "end": 46.54,
+      "segment_id": 7,
+      "start": 46.4,
+      "word": "trying"
+    },
+    {
+      "end": 46.68,
+      "segment_id": 7,
+      "start": 46.54,
+      "word": "to"
+    },
+    {
+      "end": 46.86,
+      "segment_id": 7,
+      "start": 46.68,
+      "word": "think"
+    },
+    {
+      "end": 46.96,
+      "segment_id": 7,
+      "start": 46.86,
+      "word": "of"
+    },
+    {
+      "end": 47.02,
+      "segment_id": 7,
+      "start": 46.96,
+      "word": "the"
+    },
+    {
+      "end": 47.28,
+      "segment_id": 7,
+      "start": 47.02,
+      "word": "last"
+    },
+    {
+      "end": 47.52,
+      "segment_id": 7,
+      "start": 47.28,
+      "word": "time"
+    },
+    {
+      "end": 47.82,
+      "segment_id": 7,
+      "start": 47.52,
+      "word": "I"
+    },
+    {
+      "end": 48.2,
+      "segment_id": 7,
+      "start": 47.82,
+      "word": "watched"
+    },
+    {
+      "end": 48.4,
+      "segment_id": 7,
+      "start": 48.2,
+      "word": "an"
+    },
+    {
+      "end": 48.76,
+      "segment_id": 7,
+      "start": 48.4,
+      "word": "18"
+    },
+    {
+      "end": 49.32,
+      "segment_id": 7,
+      "start": 49.08,
+      "word": "TED"
+    },
+    {
+      "end": 49.6,
+      "segment_id": 7,
+      "start": 49.32,
+      "word": "talk."
+    },
+    {
+      "end": 50.22,
+      "segment_id": 7,
+      "start": 49.82,
+      "word": "It's"
+    },
+    {
+      "end": 50.32,
+      "segment_id": 7,
+      "start": 50.22,
+      "word": "been"
+    },
+    {
+      "end": 50.62,
+      "segment_id": 7,
+      "start": 50.32,
+      "word": "years,"
+    },
+    {
+      "end": 51.36,
+      "segment_id": 7,
+      "start": 50.84,
+      "word": "literally"
+    },
+    {
+      "end": 51.96,
+      "segment_id": 7,
+      "start": 51.36,
+      "word": "years."
+    },
+    {
+      "end": 52.96,
+      "segment_id": 7,
+      "start": 52.56,
+      "word": "So"
+    },
+    {
+      "end": 53.06,
+      "segment_id": 7,
+      "start": 52.96,
+      "word": "if"
+    },
+    {
+      "end": 53.2,
+      "segment_id": 7,
+      "start": 53.06,
+      "word": "you're"
+    },
+    {
+      "end": 53.32,
+      "segment_id": 7,
+      "start": 53.2,
+      "word": "given"
+    },
+    {
+      "end": 53.5,
+      "segment_id": 7,
+      "start": 53.32,
+      "word": "a"
+    },
+    {
+      "end": 53.68,
+      "segment_id": 7,
+      "start": 53.5,
+      "word": "TED"
+    },
+    {
+      "end": 54.0,
+      "segment_id": 7,
+      "start": 53.68,
+      "word": "talk,"
+    },
+    {
+      "end": 54.7,
+      "segment_id": 7,
+      "start": 54.18,
+      "word": "keep"
+    },
+    {
+      "end": 54.86,
+      "segment_id": 7,
+      "start": 54.7,
+      "word": "it"
+    },
+    {
+      "end": 55.12,
+      "segment_id": 7,
+      "start": 54.86,
+      "word": "quick."
+    },
+    {
+      "end": 55.84,
+      "segment_id": 7,
+      "start": 55.44,
+      "word": "I'm"
+    },
+    {
+      "end": 55.98,
+      "segment_id": 7,
+      "start": 55.84,
+      "word": "doing"
+    },
+    {
+      "end": 56.24,
+      "segment_id": 7,
+      "start": 55.98,
+      "word": "mine"
+    },
+    {
+      "end": 56.4,
+      "segment_id": 7,
+      "start": 56.24,
+      "word": "in"
+    },
+    {
+      "end": 56.56,
+      "segment_id": 7,
+      "start": 56.4,
+      "word": "under"
+    },
+    {
+      "end": 56.68,
+      "segment_id": 7,
+      "start": 56.56,
+      "word": "a"
+    },
+    {
+      "end": 56.88,
+      "segment_id": 7,
+      "start": 56.68,
+      "word": "minute."
+    },
+    {
+      "end": 57.72,
+      "segment_id": 8,
+      "start": 57.56,
+      "word": "I'm"
+    },
+    {
+      "end": 57.74,
+      "segment_id": 8,
+      "start": 57.72,
+      "word": "at"
+    },
+    {
+      "end": 58.06,
+      "segment_id": 8,
+      "start": 57.74,
+      "word": "44"
+    },
+    {
+      "end": 58.52,
+      "segment_id": 8,
+      "start": 58.06,
+      "word": "seconds"
+    },
+    {
+      "end": 58.8,
+      "segment_id": 8,
+      "start": 58.52,
+      "word": "right"
+    },
+    {
+      "end": 59.02,
+      "segment_id": 8,
+      "start": 58.8,
+      "word": "now."
+    },
+    {
+      "end": 59.18,
+      "segment_id": 8,
+      "start": 59.1,
+      "word": "That"
+    },
+    {
+      "end": 59.34,
+      "segment_id": 8,
+      "start": 59.18,
+      "word": "means"
+    },
+    {
+      "end": 59.5,
+      "segment_id": 8,
+      "start": 59.34,
+      "word": "we've"
+    },
+    {
+      "end": 59.58,
+      "segment_id": 8,
+      "start": 59.5,
+      "word": "got"
+    },
+    {
+      "end": 59.8,
+      "segment_id": 8,
+      "start": 59.58,
+      "word": "time"
+    },
+    {
+      "end": 60.0,
+      "segment_id": 8,
+      "start": 59.8,
+      "word": "for"
+    },
+    {
+      "end": 60.14,
+      "segment_id": 8,
+      "start": 60.0,
+      "word": "one"
+    },
+    {
+      "end": 60.46,
+      "segment_id": 8,
+      "start": 60.14,
+      "word": "final"
+    },
+    {
+      "end": 60.76,
+      "segment_id": 8,
+      "start": 60.46,
+      "word": "joke."
+    },
+    {
+      "end": 61.56,
+      "segment_id": 8,
+      "start": 61.12,
+      "word": "Why"
+    },
+    {
+      "end": 61.98,
+      "segment_id": 8,
+      "start": 61.56,
+      "word": "are"
+    },
+    {
+      "end": 62.54,
+      "segment_id": 8,
+      "start": 61.98,
+      "word": "balloons"
+    },
+    {
+      "end": 63.22,
+      "segment_id": 8,
+      "start": 62.54,
+      "word": "so"
+    },
+    {
+      "end": 63.6,
+      "segment_id": 8,
+      "start": 63.22,
+      "word": "expensive?"
+    },
+    {
+      "end": 66.28,
+      "segment_id": 9,
+      "start": 65.72,
+      "word": "Inflation."
+    }
+  ],
+  "vietnamese_words": [
+    {
+      "end": 11.86,
+      "start": 10.46,
+      "word": "Wow."
+    },
+    {
+      "end": 13.19,
+      "start": 13.02,
+      "word": "Thật"
+    },
+    {
+      "end": 13.37,
+      "start": 13.19,
+      "word": "là"
+    },
+    {
+      "end": 13.54,
+      "start": 13.37,
+      "word": "một"
+    },
+    {
+      "end": 13.72,
+      "start": 13.54,
+      "word": "khán"
+    },
+    {
+      "end": 13.89,
+      "start": 13.72,
+      "word": "giả,"
+    },
+    {
+      "end": 14.07,
+      "start": 13.89,
+      "word": "nhưng"
+    },
+    {
+      "end": 14.24,
+      "start": 14.07,
+      "word": "thành"
+    },
+    {
+      "end": 14.42,
+      "start": 14.24,
+      "word": "thật"
+    },
+    {
+      "end": 14.59,
+      "start": 14.42,
+      "word": "mà"
+    },
+    {
+      "end": 14.77,
+      "start": 14.59,
+      "word": "nói,"
+    },
+    {
+      "end": 14.94,
+      "start": 14.77,
+      "word": "tôi"
+    },
+    {
+      "end": 15.11,
+      "start": 14.94,
+      "word": "không"
+    },
+    {
+      "end": 15.29,
+      "start": 15.11,
+      "word": "quan"
+    },
+    {
+      "end": 15.46,
+      "start": 15.29,
+      "word": "tâm"
+    },
+    {
+      "end": 15.64,
+      "start": 15.46,
+      "word": "bạn"
+    },
+    {
+      "end": 15.81,
+      "start": 15.64,
+      "word": "nghĩ"
+    },
+    {
+      "end": 15.99,
+      "start": 15.81,
+      "word": "gì"
+    },
+    {
+      "end": 16.16,
+      "start": 15.99,
+      "word": "về"
+    },
+    {
+      "end": 16.34,
+      "start": 16.16,
+      "word": "bài"
+    },
+    {
+      "end": 16.51,
+      "start": 16.34,
+      "word": "nói"
+    },
+    {
+      "end": 16.69,
+      "start": 16.51,
+      "word": "của"
+    },
+    {
+      "end": 16.86,
+      "start": 16.69,
+      "word": "tôi."
+    },
+    {
+      "end": 18.29,
+      "start": 18.11,
+      "word": "Tôi"
+    },
+    {
+      "end": 18.48,
+      "start": 18.29,
+      "word": "không"
+    },
+    {
+      "end": 18.66,
+      "start": 18.48,
+      "word": "quan"
+    },
+    {
+      "end": 18.85,
+      "start": 18.66,
+      "word": "tâm"
+    },
+    {
+      "end": 19.03,
+      "start": 18.85,
+      "word": "internet"
+    },
+    {
+      "end": 19.22,
+      "start": 19.03,
+      "word": "nghĩ"
+    },
+    {
+      "end": 19.4,
+      "start": 19.22,
+      "word": "gì"
+    },
+    {
+      "end": 19.59,
+      "start": 19.4,
+      "word": "về"
+    },
+    {
+      "end": 19.77,
+      "start": 19.59,
+      "word": "bài"
+    },
+    {
+      "end": 19.96,
+      "start": 19.77,
+      "word": "nói"
+    },
+    {
+      "end": 20.14,
+      "start": 19.96,
+      "word": "của"
+    },
+    {
+      "end": 20.33,
+      "start": 20.14,
+      "word": "tôi."
+    },
+    {
+      "end": 21.96,
+      "start": 21.79,
+      "word": "Bởi"
+    },
+    {
+      "end": 22.14,
+      "start": 21.96,
+      "word": "vì"
+    },
+    {
+      "end": 22.31,
+      "start": 22.14,
+      "word": "họ"
+    },
+    {
+      "end": 22.48,
+      "start": 22.31,
+      "word": "là"
+    },
+    {
+      "end": 22.66,
+      "start": 22.48,
+      "word": "những"
+    },
+    {
+      "end": 22.83,
+      "start": 22.66,
+      "word": "người"
+    },
+    {
+      "end": 23.0,
+      "start": 22.83,
+      "word": "nhìn"
+    },
+    {
+      "end": 23.18,
+      "start": 23.0,
+      "word": "thấy"
+    },
+    {
+      "end": 23.35,
+      "start": 23.18,
+      "word": "nó"
+    },
+    {
+      "end": 23.53,
+      "start": 23.35,
+      "word": "và"
+    },
+    {
+      "end": 23.7,
+      "start": 23.53,
+      "word": "chia"
+    },
+    {
+      "end": 23.87,
+      "start": 23.7,
+      "word": "sẻ"
+    },
+    {
+      "end": 24.05,
+      "start": 23.87,
+      "word": "nó."
+    },
+    {
+      "end": 24.22,
+      "start": 24.05,
+      "word": "Và"
+    },
+    {
+      "end": 24.39,
+      "start": 24.22,
+      "word": "tôi"
+    },
+    {
+      "end": 24.57,
+      "start": 24.39,
+      "word": "nghĩ"
+    },
+    {
+      "end": 24.74,
+      "start": 24.57,
+      "word": "đó"
+    },
+    {
+      "end": 24.91,
+      "start": 24.74,
+      "word": "là"
+    },
+    {
+      "end": 25.09,
+      "start": 24.91,
+      "word": "nơi"
+    },
+    {
+      "end": 25.26,
+      "start": 25.09,
+      "word": "mà"
+    },
+    {
+      "end": 25.43,
+      "start": 25.26,
+      "word": "hầu"
+    },
+    {
+      "end": 25.61,
+      "start": 25.43,
+      "word": "hết"
+    },
+    {
+      "end": 25.78,
+      "start": 25.61,
+      "word": "mọi"
+    },
+    {
+      "end": 25.95,
+      "start": 25.78,
+      "word": "người"
+    },
+    {
+      "end": 26.13,
+      "start": 25.95,
+      "word": "hiểu"
+    },
+    {
+      "end": 26.3,
+      "start": 26.13,
+      "word": "sai."
+    },
+    {
+      "end": 26.48,
+      "start": 26.3,
+      "word": "Họ"
+    },
+    {
+      "end": 26.65,
+      "start": 26.48,
+      "word": "đang"
+    },
+    {
+      "end": 26.82,
+      "start": 26.65,
+      "word": "nói"
+    },
+    {
+      "end": 27.0,
+      "start": 26.82,
+      "word": "chuyện"
+    },
+    {
+      "end": 27.17,
+      "start": 27.0,
+      "word": "với"
+    },
+    {
+      "end": 27.34,
+      "start": 27.17,
+      "word": "bạn"
+    },
+    {
+      "end": 27.52,
+      "start": 27.34,
+      "word": "ở"
+    },
+    {
+      "end": 27.69,
+      "start": 27.52,
+      "word": "đây."
+    },
+    {
+      "end": 29.12,
+      "start": 28.76,
+      "word": "Thay"
+    },
+    {
+      "end": 29.47,
+      "start": 29.12,
+      "word": "vì"
+    },
+    {
+      "end": 29.83,
+      "start": 29.47,
+      "word": "nói"
+    },
+    {
+      "end": 30.19,
+      "start": 29.83,
+      "word": "chuyện"
+    },
+    {
+      "end": 30.54,
+      "start": 30.19,
+      "word": "với"
+    },
+    {
+      "end": 30.9,
+      "start": 30.54,
+      "word": "bạn,"
+    },
+    {
+      "end": 31.25,
+      "start": 30.9,
+      "word": "người"
+    },
+    {
+      "end": 31.61,
+      "start": 31.25,
+      "word": "ngẫu"
+    },
+    {
+      "end": 31.97,
+      "start": 31.61,
+      "word": "nhiên"
+    },
+    {
+      "end": 32.32,
+      "start": 31.97,
+      "word": "cuộn"
+    },
+    {
+      "end": 32.68,
+      "start": 32.32,
+      "word": "Facebook,."
+    },
+    {
+      "end": 34.54,
+      "start": 34.33,
+      "word": "Cảm"
+    },
+    {
+      "end": 34.76,
+      "start": 34.54,
+      "word": "ơn"
+    },
+    {
+      "end": 34.97,
+      "start": 34.76,
+      "word": "vì"
+    },
+    {
+      "end": 35.19,
+      "start": 34.97,
+      "word": "cú"
+    },
+    {
+      "end": 35.4,
+      "start": 35.19,
+      "word": "nhấp"
+    },
+    {
+      "end": 35.62,
+      "start": 35.4,
+      "word": "chuột."
+    },
+    {
+      "end": 35.83,
+      "start": 35.62,
+      "word": "Bạn"
+    },
+    {
+      "end": 36.05,
+      "start": 35.83,
+      "word": "thấy"
+    },
+    {
+      "end": 36.26,
+      "start": 36.05,
+      "word": "đấy,"
+    },
+    {
+      "end": 36.48,
+      "start": 36.26,
+      "word": "trở"
+    },
+    {
+      "end": 36.69,
+      "start": 36.48,
+      "word": "lại"
+    },
+    {
+      "end": 36.91,
+      "start": 36.69,
+      "word": "năm"
+    },
+    {
+      "end": 37.12,
+      "start": 36.91,
+      "word": "2009,"
+    },
+    {
+      "end": 37.34,
+      "start": 37.12,
+      "word": "tất"
+    },
+    {
+      "end": 37.55,
+      "start": 37.34,
+      "word": "cả"
+    },
+    {
+      "end": 37.77,
+      "start": 37.55,
+      "word": "chúng"
+    },
+    {
+      "end": 37.98,
+      "start": 37.77,
+      "word": "ta"
+    },
+    {
+      "end": 38.2,
+      "start": 37.98,
+      "word": "đều"
+    },
+    {
+      "end": 38.41,
+      "start": 38.2,
+      "word": "có"
+    },
+    {
+      "end": 38.63,
+      "start": 38.41,
+      "word": "những"
+    },
+    {
+      "end": 38.84,
+      "start": 38.63,
+      "word": "thứ"
+    },
+    {
+      "end": 39.06,
+      "start": 38.84,
+      "word": "nhỏ"
+    },
+    {
+      "end": 39.27,
+      "start": 39.06,
+      "word": "bé"
+    },
+    {
+      "end": 39.49,
+      "start": 39.27,
+      "word": "kỳ"
+    },
+    {
+      "end": 39.7,
+      "start": 39.49,
+      "word": "lạ"
+    },
+    {
+      "end": 39.92,
+      "start": 39.7,
+      "word": "được"
+    },
+    {
+      "end": 40.13,
+      "start": 39.92,
+      "word": "gọi"
+    },
+    {
+      "end": 40.35,
+      "start": 40.13,
+      "word": "là"
+    },
+    {
+      "end": 40.56,
+      "start": 40.35,
+      "word": "khoảng"
+    },
+    {
+      "end": 40.78,
+      "start": 40.56,
+      "word": "chú"
+    },
+    {
+      "end": 40.99,
+      "start": 40.78,
+      "word": "ý."
+    },
+    {
+      "end": 42.48,
+      "start": 42.3,
+      "word": "Ừ,"
+    },
+    {
+      "end": 42.66,
+      "start": 42.48,
+      "word": "họ"
+    },
+    {
+      "end": 42.84,
+      "start": 42.66,
+      "word": "đi"
+    },
+    {
+      "end": 43.03,
+      "start": 42.84,
+      "word": "rồi."
+    },
+    {
+      "end": 43.21,
+      "start": 43.03,
+      "word": "Họ"
+    },
+    {
+      "end": 43.39,
+      "start": 43.21,
+      "word": "đi"
+    },
+    {
+      "end": 43.57,
+      "start": 43.39,
+      "word": "rồi."
+    },
+    {
+      "end": 43.75,
+      "start": 43.57,
+      "word": "Chúng"
+    },
+    {
+      "end": 43.93,
+      "start": 43.75,
+      "word": "ta"
+    },
+    {
+      "end": 44.11,
+      "start": 43.93,
+      "word": "đã"
+    },
+    {
+      "end": 44.29,
+      "start": 44.11,
+      "word": "giết"
+    },
+    {
+      "end": 44.48,
+      "start": 44.29,
+      "word": "họ."
+    },
+    {
+      "end": 44.66,
+      "start": 44.48,
+      "word": "Họ"
+    },
+    {
+      "end": 44.84,
+      "start": 44.66,
+      "word": "chết"
+    },
+    {
+      "end": 45.02,
+      "start": 44.84,
+      "word": "rồi."
+    },
+    {
+      "end": 46.43,
+      "start": 46.24,
+      "word": "Tôi"
+    },
+    {
+      "end": 46.61,
+      "start": 46.43,
+      "word": "đang"
+    },
+    {
+      "end": 46.8,
+      "start": 46.61,
+      "word": "cố"
+    },
+    {
+      "end": 46.99,
+      "start": 46.8,
+      "word": "gắng"
+    },
+    {
+      "end": 47.17,
+      "start": 46.99,
+      "word": "nghĩ"
+    },
+    {
+      "end": 47.36,
+      "start": 47.17,
+      "word": "về"
+    },
+    {
+      "end": 47.55,
+      "start": 47.36,
+      "word": "lần"
+    },
+    {
+      "end": 47.73,
+      "start": 47.55,
+      "word": "cuối"
+    },
+    {
+      "end": 47.92,
+      "start": 47.73,
+      "word": "cùng"
+    },
+    {
+      "end": 48.11,
+      "start": 47.92,
+      "word": "tôi"
+    },
+    {
+      "end": 48.29,
+      "start": 48.11,
+      "word": "xem"
+    },
+    {
+      "end": 48.48,
+      "start": 48.29,
+      "word": "một"
+    },
+    {
+      "end": 48.67,
+      "start": 48.48,
+      "word": "bài"
+    },
+    {
+      "end": 48.85,
+      "start": 48.67,
+      "word": "nói"
+    },
+    {
+      "end": 49.04,
+      "start": 48.85,
+      "word": "chuyện"
+    },
+    {
+      "end": 49.23,
+      "start": 49.04,
+      "word": "TED"
+    },
+    {
+      "end": 49.41,
+      "start": 49.23,
+      "word": "dài"
+    },
+    {
+      "end": 49.6,
+      "start": 49.41,
+      "word": "18"
+    },
+    {
+      "end": 49.79,
+      "start": 49.6,
+      "word": "năm."
+    },
+    {
+      "end": 49.97,
+      "start": 49.79,
+      "word": "Đã"
+    },
+    {
+      "end": 50.16,
+      "start": 49.97,
+      "word": "nhiều"
+    },
+    {
+      "end": 50.35,
+      "start": 50.16,
+      "word": "năm,"
+    },
+    {
+      "end": 50.53,
+      "start": 50.35,
+      "word": "theo"
+    },
+    {
+      "end": 50.72,
+      "start": 50.53,
+      "word": "nghĩa"
+    },
+    {
+      "end": 50.91,
+      "start": 50.72,
+      "word": "đen"
+    },
+    {
+      "end": 51.09,
+      "start": 50.91,
+      "word": "là"
+    },
+    {
+      "end": 51.28,
+      "start": 51.09,
+      "word": "nhiều"
+    },
+    {
+      "end": 51.47,
+      "start": 51.28,
+      "word": "năm."
+    },
+    {
+      "end": 51.65,
+      "start": 51.47,
+      "word": "Vì"
+    },
+    {
+      "end": 51.84,
+      "start": 51.65,
+      "word": "vậy,"
+    },
+    {
+      "end": 52.03,
+      "start": 51.84,
+      "word": "nếu"
+    },
+    {
+      "end": 52.21,
+      "start": 52.03,
+      "word": "bạn"
+    },
+    {
+      "end": 52.4,
+      "start": 52.21,
+      "word": "được"
+    },
+    {
+      "end": 52.59,
+      "start": 52.4,
+      "word": "cho"
+    },
+    {
+      "end": 52.77,
+      "start": 52.59,
+      "word": "một"
+    },
+    {
+      "end": 52.96,
+      "start": 52.77,
+      "word": "bài"
+    },
+    {
+      "end": 53.15,
+      "start": 52.96,
+      "word": "nói"
+    },
+    {
+      "end": 53.33,
+      "start": 53.15,
+      "word": "chuyện"
+    },
+    {
+      "end": 53.52,
+      "start": 53.33,
+      "word": "TED,"
+    },
+    {
+      "end": 53.71,
+      "start": 53.52,
+      "word": "hãy"
+    },
+    {
+      "end": 53.89,
+      "start": 53.71,
+      "word": "giữ"
+    },
+    {
+      "end": 54.08,
+      "start": 53.89,
+      "word": "nó"
+    },
+    {
+      "end": 54.27,
+      "start": 54.08,
+      "word": "nhanh."
+    },
+    {
+      "end": 54.45,
+      "start": 54.27,
+      "word": "Tôi"
+    },
+    {
+      "end": 54.64,
+      "start": 54.45,
+      "word": "đang"
+    },
+    {
+      "end": 54.83,
+      "start": 54.64,
+      "word": "làm"
+    },
+    {
+      "end": 55.01,
+      "start": 54.83,
+      "word": "bài"
+    },
+    {
+      "end": 55.2,
+      "start": 55.01,
+      "word": "nói"
+    },
+    {
+      "end": 55.39,
+      "start": 55.2,
+      "word": "chuyện"
+    },
+    {
+      "end": 55.57,
+      "start": 55.39,
+      "word": "của"
+    },
+    {
+      "end": 55.76,
+      "start": 55.57,
+      "word": "tôi"
+    },
+    {
+      "end": 55.95,
+      "start": 55.76,
+      "word": "trong"
+    },
+    {
+      "end": 56.13,
+      "start": 55.95,
+      "word": "vòng"
+    },
+    {
+      "end": 56.32,
+      "start": 56.13,
+      "word": "chưa"
+    },
+    {
+      "end": 56.51,
+      "start": 56.32,
+      "word": "đầy"
+    },
+    {
+      "end": 56.69,
+      "start": 56.51,
+      "word": "một"
+    },
+    {
+      "end": 56.88,
+      "start": 56.69,
+      "word": "phút."
+    },
+    {
+      "end": 57.77,
+      "start": 57.56,
+      "word": "Tôi"
+    },
+    {
+      "end": 57.98,
+      "start": 57.77,
+      "word": "đang"
+    },
+    {
+      "end": 58.18,
+      "start": 57.98,
+      "word": "ở"
+    },
+    {
+      "end": 58.39,
+      "start": 58.18,
+      "word": "44"
+    },
+    {
+      "end": 58.6,
+      "start": 58.39,
+      "word": "giây."
+    },
+    {
+      "end": 58.81,
+      "start": 58.6,
+      "word": "Điều"
+    },
+    {
+      "end": 59.02,
+      "start": 58.81,
+      "word": "đó"
+    },
+    {
+      "end": 59.23,
+      "start": 59.02,
+      "word": "có"
+    },
+    {
+      "end": 59.43,
+      "start": 59.23,
+      "word": "nghĩa"
+    },
+    {
+      "end": 59.64,
+      "start": 59.43,
+      "word": "là"
+    },
+    {
+      "end": 59.85,
+      "start": 59.64,
+      "word": "chúng"
+    },
+    {
+      "end": 60.06,
+      "start": 59.85,
+      "word": "ta"
+    },
+    {
+      "end": 60.27,
+      "start": 60.06,
+      "word": "có"
+    },
+    {
+      "end": 60.48,
+      "start": 60.27,
+      "word": "thời"
+    },
+    {
+      "end": 60.68,
+      "start": 60.48,
+      "word": "gian"
+    },
+    {
+      "end": 60.89,
+      "start": 60.68,
+      "word": "cho"
+    },
+    {
+      "end": 61.1,
+      "start": 60.89,
+      "word": "một"
+    },
+    {
+      "end": 61.31,
+      "start": 61.1,
+      "word": "trò"
+    },
+    {
+      "end": 61.52,
+      "start": 61.31,
+      "word": "đùa"
+    },
+    {
+      "end": 61.73,
+      "start": 61.52,
+      "word": "cuối"
+    },
+    {
+      "end": 61.93,
+      "start": 61.73,
+      "word": "cùng."
+    },
+    {
+      "end": 62.14,
+      "start": 61.93,
+      "word": "Tại"
+    },
+    {
+      "end": 62.35,
+      "start": 62.14,
+      "word": "sao"
+    },
+    {
+      "end": 62.56,
+      "start": 62.35,
+      "word": "bong"
+    },
+    {
+      "end": 62.77,
+      "start": 62.56,
+      "word": "bóng"
+    },
+    {
+      "end": 62.98,
+      "start": 62.77,
+      "word": "lại"
+    },
+    {
+      "end": 63.18,
+      "start": 62.98,
+      "word": "đắt"
+    },
+    {
+      "end": 63.39,
+      "start": 63.18,
+      "word": "như"
+    },
+    {
+      "end": 63.6,
+      "start": 63.39,
+      "word": "vậy?"
+    },
+    {
+      "end": 66.0,
+      "start": 65.72,
+      "word": "Lạm"
+    },
+    {
+      "end": 66.28,
+      "start": 66.0,
+      "word": "phát."
+    }
+  ],
+  "english_text": "Wow. What an audience, but if I'm being honest, I don't care what you think of my talk. I don't. I care what the internet thinks of my talk. Because they're the ones who get it seen and get it shared. And I think that's where most people get it wrong. They're talking to you here. Instead of talking to you, random person scrolling Facebook, Thanks for the click. You see, back in 2009, we all had these weird little things called attention spans. Yeah, they're gone. They're gone. We killed them. They're dead. I'm trying to think of the last time I watched an 18 TED talk. It's been years, literally years. So if you're given a TED talk, keep it quick. I'm doing mine in under a minute. I'm at 44 seconds right now. That means we've got time for one final joke. Why are balloons so expensive? Inflation.",
+  "vietnamese_text": "Wow. Thật là một khán giả, nhưng thành thật mà nói, tôi không quan tâm bạn nghĩ gì về bài nói của tôi. Tôi không quan tâm internet nghĩ gì về bài nói của tôi. Bởi vì họ là những người nhìn thấy nó và chia sẻ nó. Và tôi nghĩ đó là nơi mà hầu hết mọi người hiểu sai. Họ đang nói chuyện với bạn ở đây. Thay vì nói chuyện với bạn, người ngẫu nhiên cuộn Facebook,. Cảm ơn vì cú nhấp chuột. Bạn thấy đấy, trở lại năm 2009, tất cả chúng ta đều có những thứ nhỏ bé kỳ lạ được gọi là khoảng chú ý. Ừ, họ đi rồi. Họ đi rồi. Chúng ta đã giết họ. Họ chết rồi. Tôi đang cố gắng nghĩ về lần cuối cùng tôi xem một bài nói chuyện TED dài 18 năm. Đã nhiều năm, theo nghĩa đen là nhiều năm. Vì vậy, nếu bạn được cho một bài nói chuyện TED, hãy giữ nó nhanh. Tôi đang làm bài nói chuyện của tôi trong vòng chưa đầy một phút. Tôi đang ở 44 giây. Điều đó có nghĩa là chúng ta có thời gian cho một trò đùa cuối cùng. Tại sao bong bóng lại đắt như vậy? Lạm phát.",
+  "en_srt_path": "outputs\\6115eb19-0a16-4db2-ba8e-d9339103b7c8_en.srt",
+  "vi_srt_path": "outputs\\6115eb19-0a16-4db2-ba8e-d9339103b7c8_vi.srt"
+}

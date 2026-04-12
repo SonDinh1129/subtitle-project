@@ -1,0 +1,648 @@
+import { useState, useRef, useCallback } from "react";
+import { useNavigate } from "react-router";
+import { motion, AnimatePresence } from "motion/react";
+import { uploadVideo, pollUntilDone, STATUS_MESSAGES, type ProcessMode } from "../../lib/api";
+import { useUiPreferences } from "../context/UiPreferencesContext";
+import {
+  Upload,
+  FileVideo,
+  X,
+  CheckCircle2,
+  Sparkles,
+  Languages,
+  Clock,
+  ChevronDown,
+  AlertCircle,
+  Play,
+  Zap,
+} from "lucide-react";
+
+const SUPPORTED_FORMATS = ["MP4", "MOV", "MKV", "AVI", "WEBM"];
+const LANGUAGES = [{ id: "english-only", en: "English only", vi: "Chỉ tiếng Anh" }];
+
+type UploadState = "idle" | "dragover" | "uploading" | "processing" | "done" | "error";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDuration(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+export function UploadPage() {
+  const { language: appLanguage } = useUiPreferences();
+  const isVi = appLanguage === "vi";
+  const [state, setState] = useState<UploadState>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [language, setLanguage] = useState("english-only");
+  const [langOpen, setLangOpen] = useState(false);
+  const [processingMsg, setProcessingMsg] = useState(isVi ? "Đang phân tích âm thanh..." : "Analyzing audio...");
+  const [processMode, setProcessMode] = useState<ProcessMode>("normal");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+
+  const processingMessages = [
+    isVi ? "Đang phân tích âm thanh..." : "Analyzing audio...",
+    isVi ? "Đang nhận dạng tiếng Anh..." : "Transcribing to English...",
+    isVi ? "Đang căn chỉnh mốc thời gian..." : "Aligning timestamps...",
+    isVi ? "Đang hoàn tất phụ đề..." : "Finalizing subtitles...",
+  ];
+
+  const handleRealUpload = useCallback(async (file: File) => {
+    setSelectedFile(file);
+    if (file.type.startsWith("video/")) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      sessionStorage.setItem("videoPreviewUrl", url);
+    }
+    setState("uploading");
+    setUploadProgress(0);
+
+    try {
+      // uploadVideo trả về string (job_id trực tiếp)
+      const jobId = await uploadVideo(file, processMode, "segment", (pct) => {
+        setUploadProgress(pct);
+      });
+
+      sessionStorage.setItem("uploadedFileName", file.name);
+      sessionStorage.setItem("subtitleProcessMode", processMode);
+
+      if (processMode === "realtime") {
+        sessionStorage.setItem(
+          "currentJob",
+          JSON.stringify({
+            job_id: jobId,
+            status: "queued",
+            progress: 0,
+            english_words: [],
+            vietnamese_words: [],
+          }),
+        );
+        navigate(`/editor?mode=realtime&job_id=${encodeURIComponent(jobId)}`);
+        return;
+      }
+
+      setState("processing");
+
+      const finalJob = await pollUntilDone(
+        jobId,
+        (job) => {
+          setProcessingProgress(job.progress ?? 0);
+          setProcessingMsg(STATUS_MESSAGES[job.status] ?? "Processing...");
+        }
+      );
+
+      // Lưu job kết quả vào sessionStorage
+      sessionStorage.setItem("currentJob", JSON.stringify(finalJob));
+
+      setProcessingProgress(100);
+      setProcessingMsg(isVi ? "Đã tạo phụ đề!" : "Subtitles generated!");
+      setState("done");
+
+    } catch (err) {
+      console.error(err);
+      setState("error");
+    }
+  }, [isVi, navigate, processMode]);
+
+  const startProcessing = () => {
+    setState("processing");
+    setProcessingProgress(0);
+    let msgIdx = 0;
+    let progress = 0;
+
+    const msgInterval = setInterval(() => {
+      msgIdx = (msgIdx + 1) % processingMessages.length;
+      setProcessingMsg(processingMessages[msgIdx]);
+    }, 1500);
+
+    const interval = setInterval(() => {
+      progress += Math.random() * 8 + 2;
+      if (progress >= 100) {
+        progress = 100;
+        clearInterval(interval);
+        clearInterval(msgInterval);
+        setProcessingProgress(100);
+        setProcessingMsg(isVi ? "Đã tạo phụ đề!" : "Subtitles generated!");
+        setState("done");
+      } else {
+        setProcessingProgress(Math.min(progress, 98));
+      }
+    }, 150);
+  };
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setState("idle");
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith("video/")) {
+        handleRealUpload(file);
+      } else {
+        setState("error");
+        setTimeout(() => setState("idle"), 3000);
+      }
+    },
+    [handleRealUpload]
+  );
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleRealUpload(file);
+  };
+
+  const handleReset = () => {
+    setState("idle");
+    setSelectedFile(null);
+    setPreviewUrl(null);
+    setUploadProgress(0);
+    setProcessingProgress(0);
+    sessionStorage.removeItem("subtitleProcessMode");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  return (
+    <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-b from-gray-50 to-white dark:from-gray-950 dark:to-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-5xl mx-auto">
+        {/* Page Header */}
+        <div className="text-center mb-10">
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-4xl text-gray-900 dark:text-gray-100 tracking-tight mb-3"
+          >
+            {isVi ? "Tải video của bạn" : "Upload Your Video"}
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-gray-500 dark:text-gray-300"
+          >
+            {isVi
+              ? "Tải video lên và mô hình tiếng Anh sẽ tạo phụ đề chính xác tự động."
+              : "Upload a video file and our English model will generate accurate subtitles automatically."}
+          </motion.p>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Main Upload Area */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Drop Zone */}
+            <AnimatePresence mode="wait">
+              {(state === "idle" || state === "dragover" || state === "error") && (
+                <motion.div
+                  key="dropzone"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  onDragOver={(e) => { e.preventDefault(); setState("dragover"); }}
+                  onDragLeave={() => setState("idle")}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`relative border-2 border-dashed rounded-2xl cursor-pointer transition-all overflow-hidden ${
+                    state === "dragover"
+                      ? "border-violet-500 bg-violet-50 dark:bg-violet-950/40"
+                      : state === "error"
+                      ? "border-red-400 bg-red-50 dark:bg-red-950/30"
+                      : "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 hover:border-violet-400 hover:bg-violet-50/30 dark:hover:bg-violet-950/20"
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  <div className="py-16 px-8 flex flex-col items-center text-center">
+                    <motion.div
+                      animate={{ y: state === "dragover" ? -8 : 0 }}
+                      transition={{ type: "spring", stiffness: 300 }}
+                      className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-5 ${
+                        state === "error"
+                          ? "bg-red-100 dark:bg-red-900/40"
+                          : state === "dragover"
+                          ? "bg-violet-100 dark:bg-violet-900/40"
+                          : "bg-gradient-to-br from-violet-50 to-indigo-50 dark:from-violet-900/30 dark:to-indigo-900/30 border border-violet-100 dark:border-violet-700/40"
+                      }`}
+                    >
+                      {state === "error" ? (
+                        <AlertCircle className="w-9 h-9 text-red-500" />
+                      ) : (
+                        <Upload
+                          className={`w-9 h-9 ${
+                            state === "dragover" ? "text-violet-600" : "text-violet-400"
+                          }`}
+                        />
+                      )}
+                    </motion.div>
+
+                    {state === "error" ? (
+                      <>
+                        <p className="text-red-600 dark:text-red-300 mb-1">
+                          {isVi ? "Loại tệp không hợp lệ" : "Invalid file type"}
+                        </p>
+                        <p className="text-sm text-red-400 dark:text-red-200/80">
+                          {isVi ? "Vui lòng tải lên tệp video hợp lệ" : "Please upload a valid video file"}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-gray-700 dark:text-gray-100 mb-1">
+                          {state === "dragover"
+                            ? isVi
+                              ? "Thả tệp vào đây!"
+                              : "Drop it here!"
+                            : isVi
+                            ? "Kéo thả video của bạn vào đây"
+                            : "Drag & drop your video here"}
+                        </p>
+                        <p className="text-sm text-gray-400 dark:text-gray-300 mb-4">
+                          {isVi ? "hoặc" : "or"}{" "}
+                          <span className="text-violet-600 dark:text-violet-300 underline underline-offset-2">
+                            {isVi ? "chọn tệp để tải lên" : "browse to upload"}
+                          </span>
+                        </p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          {SUPPORTED_FORMATS.map((fmt) => (
+                            <span
+                              key={fmt}
+                              className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-300 px-2.5 py-1 rounded-md"
+                            >
+                              {fmt}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-400 dark:text-gray-300 mt-3">
+                          {isVi ? "Dung lượng tối đa: 2 GB" : "Max file size: 2 GB"}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+
+              {state === "uploading" && (
+                <motion.div
+                  key="uploading"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm"
+                >
+                  <div className="flex items-start gap-4">
+                    {/* Video Thumbnail */}
+                    <div className="w-24 h-16 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 flex-shrink-0 flex items-center justify-center">
+                      {previewUrl ? (
+                        <video src={previewUrl} className="w-full h-full object-cover" />
+                      ) : (
+                        <FileVideo className="w-6 h-6 text-gray-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
+                          {selectedFile?.name}
+                        </p>
+                        <button
+                          onClick={handleReset}
+                          className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 flex-shrink-0"
+                        >
+                          <X className="w-4 h-4 text-gray-400" />
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-400 dark:text-gray-300 mb-3">
+                        {selectedFile ? formatBytes(selectedFile.size) : ""}
+                      </p>
+                      {/* Progress bar */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-300">
+                          <span>{isVi ? "Đang tải lên…" : "Uploading…"}</span>
+                          <span>{Math.round(uploadProgress)}%</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                          <motion.div
+                            className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full"
+                            initial={{ width: "0%" }}
+                            animate={{ width: `${uploadProgress}%` }}
+                            transition={{ ease: "easeOut" }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {state === "processing" && (
+                <motion.div
+                  key="processing"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm"
+                >
+                  <div className="text-center">
+                    {/* Animated AI ring */}
+                    <div className="relative w-24 h-24 mx-auto mb-6">
+                      <svg className="w-24 h-24 -rotate-90" viewBox="0 0 96 96">
+                        <circle
+                          cx="48" cy="48" r="44"
+                          fill="none" stroke="#f3f4f6" strokeWidth="8"
+                        />
+                        <motion.circle
+                          cx="48" cy="48" r="44"
+                          fill="none"
+                          stroke="url(#grad)"
+                          strokeWidth="8"
+                          strokeLinecap="round"
+                          strokeDasharray={276.46}
+                          strokeDashoffset={276.46 * (1 - processingProgress / 100)}
+                          transition={{ ease: "easeOut" }}
+                        />
+                        <defs>
+                          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stopColor="#7c3aed" />
+                            <stop offset="100%" stopColor="#4f46e5" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                        >
+                          <Sparkles className="w-7 h-7 text-violet-600" />
+                        </motion.div>
+                      </div>
+                    </div>
+
+                    <AnimatePresence mode="wait">
+                      <motion.p
+                        key={processingMsg}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        className="text-gray-700 dark:text-gray-100 mb-1"
+                      >
+                        {processingMsg}
+                      </motion.p>
+                    </AnimatePresence>
+                    <p className="text-sm text-gray-400 dark:text-gray-300 mb-4">
+                      {isVi
+                        ? `${Math.round(processingProgress)}% hoàn tất · Dự kiến 1-2 phút`
+                        : `${Math.round(processingProgress)}% complete · Estimated 1-2 minutes`}
+                    </p>
+
+                    <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden max-w-xs mx-auto">
+                      <motion.div
+                        className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full"
+                        initial={{ width: "0%" }}
+                        animate={{ width: `${processingProgress}%` }}
+                      />
+                    </div>
+
+                    {/* Steps */}
+                    <div className="flex items-center justify-center gap-6 mt-6">
+                      {[
+                        isVi ? "Nhận dạng" : "Transcription",
+                        isVi ? "Căn chỉnh" : "Alignment",
+                        isVi ? "Định dạng" : "Formatting",
+                      ].map((step, i) => (
+                        <div key={step} className="flex items-center gap-1.5">
+                          <div
+                            className={`w-4 h-4 rounded-full flex items-center justify-center ${
+                              processingProgress > i * 33
+                                ? "bg-violet-600"
+                                : "bg-gray-200 dark:bg-gray-700"
+                            }`}
+                          >
+                            {processingProgress > i * 33 && (
+                              <CheckCircle2 className="w-3 h-3 text-white" />
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-500 dark:text-gray-300">{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {state === "done" && (
+                <motion.div
+                  key="done"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white dark:bg-gray-900 border border-green-200 dark:border-green-700 rounded-2xl p-8 shadow-sm text-center"
+                >
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 300, delay: 0.1 }}
+                    className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                  >
+                    <CheckCircle2 className="w-8 h-8 text-green-600" />
+                  </motion.div>
+                  <h3 className="text-gray-900 dark:text-gray-100 mb-1">{isVi ? "Đã tạo phụ đề!" : "Subtitles Generated!"}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-300 mb-6">
+                    {isVi
+                      ? "Phụ đề đã sẵn sàng. Xem trước và chỉnh sửa trong Editor."
+                      : "Your subtitles are ready. Preview and edit them in the editor."}
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <button
+                      onClick={() => {
+                        if (selectedFile) {
+                          // Lưu tên file để EditorPage gọi API lấy về
+                          sessionStorage.setItem("uploadedFileName", selectedFile.name);
+                        }
+                        if (previewUrl) sessionStorage.setItem("videoPreviewUrl", previewUrl);
+                        navigate("/editor");
+                      }}
+                      className="flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-6 py-2.5 rounded-xl hover:from-violet-700 hover:to-indigo-700 transition-all shadow-sm"
+                    >
+                      <Play className="w-4 h-4" />
+                      {isVi ? "Mở trong Editor" : "Open in Editor"}
+                    </button>
+                    <button
+                      onClick={handleReset}
+                      className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-200 border border-gray-200 dark:border-gray-700 px-6 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+                    >
+                      <Upload className="w-4 h-4" />
+                      {isVi ? "Tải video khác" : "Upload Another"}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Generate Button */}
+            {state === "idle" && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white py-3.5 rounded-xl shadow-md shadow-violet-200 hover:shadow-lg transition-all"
+              >
+                <Zap className="w-4 h-4" />
+                {processMode === "realtime"
+                  ? isVi
+                    ? "Tải lên & bắt đầu Realtime"
+                    : "Upload & Start Realtime"
+                  : isVi
+                  ? "Tải lên & tạo phụ đề"
+                  : "Upload & Generate Subtitles"}
+              </button>
+            )}
+
+            {/* Format Tips */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl p-4 flex gap-3">
+              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-4 h-4 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-blue-700 dark:text-blue-200 mb-0.5">{isVi ? "Mẹo để có kết quả tốt" : "Best results tip"}</p>
+                <p className="text-xs text-blue-500 dark:text-blue-100/90 leading-relaxed">
+                  {isVi
+                    ? "Để đạt độ chính xác cao, hãy đảm bảo video có âm thanh rõ và ít tạp âm. Hỗ trợ: MP4, MOV, MKV, AVI, WEBM · Dung lượng tối đa: 2 GB · Thời lượng tối đa: 4 giờ."
+                    : "For best accuracy, ensure your video has clear audio with minimal background noise. Supported: MP4, MOV, MKV, AVI, WEBM · Max size: 2 GB · Max duration: 4 hours."}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Settings Sidebar */}
+          <div className="space-y-4">
+            {/* Language Selection */}
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 shadow-sm">
+              <h3 className="text-sm text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                <Languages className="w-4 h-4 text-violet-500" />
+                {isVi ? "Ngôn ngữ" : "Language"}
+              </h3>
+              <div className="relative">
+                <button
+                  onClick={() => setLangOpen(!langOpen)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  <span>{LANGUAGES.find((lang) => lang.id === language)?.[isVi ? "vi" : "en"] ?? "English only"}</span>
+                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${langOpen ? "rotate-180" : ""}`} />
+                </button>
+                <AnimatePresence>
+                  {langOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      className="absolute top-full mt-1 left-0 right-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 max-h-48 overflow-y-auto"
+                    >
+                      {LANGUAGES.map((lang) => (
+                        <button
+                          key={lang.id}
+                          onClick={() => { setLanguage(lang.id); setLangOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                            language === lang.id
+                              ? "text-violet-700 dark:text-violet-200 bg-violet-50 dark:bg-violet-900/30"
+                              : "text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          }`}
+                        >
+                          {isVi ? lang.vi : lang.en}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+              <p className="text-xs text-gray-400 dark:text-gray-300 mt-2">
+                {isVi
+                  ? "Mô hình hiện tại chỉ hỗ trợ luồng làm việc tiếng Anh"
+                  : "Current model supports English workflow only"}
+              </p>
+            </div>
+
+            {/* Mode Selector */}
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 shadow-sm">
+              <h3 className="text-sm text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-violet-500" />
+                {isVi ? "Chế độ phụ đề" : "Subtitle Mode"}
+              </h3>
+              <div className="space-y-2">
+                {[
+                  {
+                    id: "normal",
+                    label: isVi ? "Thường" : "Normal",
+                    desc: isVi ? "Chờ xử lý xong mới vào Editor" : "Enter Editor after processing completes",
+                    badge: isVi ? "Mặc định" : "Default",
+                  },
+                  {
+                    id: "realtime",
+                    label: "Realtime",
+                    desc: isVi ? "Vào Editor ngay, không cần đợi" : "Enter Editor immediately, no waiting",
+                    badge: "Beta",
+                  },
+                ].map((mode) => (
+                  <label
+                    key={mode.id}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors ${
+                      processMode === mode.id
+                        ? "border-violet-300 bg-violet-50 dark:bg-violet-900/30 dark:border-violet-700"
+                        : "border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="subtitle-mode"
+                      value={mode.id}
+                      checked={processMode === mode.id}
+                      onChange={() => setProcessMode(mode.id as ProcessMode)}
+                      className="accent-violet-600"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700 dark:text-gray-100">{mode.label}</span>
+                        {mode.badge && (
+                          <span
+                            className={`text-xs px-1.5 py-0.5 rounded-md ${mode.id === "realtime"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-green-100 text-green-700"
+                              }`}
+                          >
+                            {mode.badge}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[11px] text-gray-400 dark:text-gray-300 text-right max-w-32">{mode.desc}</span>
+                  </label>
+                ))}
+              </div>
+              
+            </div>
+
+            {/* Quick Stats */}
+            <div className="bg-gradient-to-br from-violet-600 to-indigo-700 rounded-2xl p-4 text-white">
+              <h3 className="text-sm text-violet-100 mb-4">{isVi ? "Vì sao chọn SubAI?" : "Why choose SubAI?"}</h3>
+              <div className="space-y-3">
+                {[
+                  { icon: CheckCircle2, label: isVi ? "98,5% độ chính xác tiếng Anh" : "98.5% English accuracy" },
+                  { icon: Clock, label: isVi ? "Có kết quả trong dưới 2 phút" : "Results in under 2 min" },
+                  { icon: Languages, label: isVi ? "Mô hình chỉ tiếng Anh" : "English-only model" },
+                  { icon: Sparkles, label: isVi ? "Chỉnh sửa Realtime" : "Realtime editing workflow" },
+                ].map((item) => (
+                  <div key={item.label} className="flex items-center gap-2.5">
+                    <item.icon className="w-4 h-4 text-violet-300 flex-shrink-0" />
+                    <span className="text-sm text-violet-100">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,11 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+.DS_Store
+.env
+uploads/
+outputs/
+*.mp4

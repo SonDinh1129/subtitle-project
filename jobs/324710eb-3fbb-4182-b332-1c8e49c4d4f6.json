@@ -1,0 +1,16 @@
+{
+  "job_id": "324710eb-3fbb-4182-b332-1c8e49c4d4f6",
+  "filename": "video_test.mp4",
+  "status": "error",
+  "progress": 40,
+  "translation_mode": "segment",
+  "video_path": "uploads\\324710eb-3fbb-4182-b332-1c8e49c4d4f6_video_test.mp4",
+  "created_at": 1773422677.7819448,
+  "error": "Failed after 3 attempts: HTTPSConnectionPool(host='your-ngrok-url.ngrok-free.dev', port=443): Max retries exceeded with url: /transcribe_translate (Caused by SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol (_ssl.c:2393)')))",
+  "english_words": [],
+  "vietnamese_words": [],
+  "english_text": "",
+  "vietnamese_text": "",
+  "en_srt_path": null,
+  "vi_srt_path": null
+}

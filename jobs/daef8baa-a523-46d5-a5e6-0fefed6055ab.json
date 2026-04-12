@@ -1,0 +1,16 @@
+{
+  "job_id": "daef8baa-a523-46d5-a5e6-0fefed6055ab",
+  "filename": "video_test.mp4",
+  "status": "error",
+  "progress": 40,
+  "translation_mode": "segment",
+  "video_path": "uploads\\daef8baa-a523-46d5-a5e6-0fefed6055ab_video_test.mp4",
+  "created_at": 1776007963.049816,
+  "error": "name 'result' is not defined",
+  "english_words": [],
+  "vietnamese_words": [],
+  "english_text": "",
+  "vietnamese_text": "",
+  "en_srt_path": null,
+  "vi_srt_path": null
+}
