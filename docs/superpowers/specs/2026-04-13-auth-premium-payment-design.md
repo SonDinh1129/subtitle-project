@@ -181,6 +181,17 @@ PyJWT>=2.8.0
 supabase>=2.0.0   # service role client cho webhook
 ```
 
+### Supabase service client (khởi tạo trong `app.py`)
+
+```python
+from supabase import create_client
+supabase_service = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+)
+```
+Client này dùng **service role key** — chỉ dùng trên backend, không bao giờ expose ra frontend.
+
 ### `middleware/auth.py`
 
 ```python
