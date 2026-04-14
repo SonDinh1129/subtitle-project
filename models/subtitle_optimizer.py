@@ -237,3 +237,63 @@ def fix_duration(blocks: list[SubtitleBlock]) -> tuple[list[SubtitleBlock], bool
             result.append(block)
 
     return result, changed
+
+
+# ─────────────────────────────────────────────────────────────────
+# TEXT WRAPPING
+# ─────────────────────────────────────────────────────────────────
+
+def wrap_text(text: str, max_cpl: int) -> list[str]:
+    """Greedy wrap, prefer balanced top-heavy lines.
+
+    Top-heavy = line 1 >= line 2 in length.
+    Greedy wrap naturally creates top-heavy output (fills from left),
+    matching bottom-screen subtitle convention.
+    """
+    words = text.split()
+    if not words:
+        return ['']
+
+    # If text fits on one line, return as-is
+    if len(text) <= max_cpl:
+        return [text]
+
+    # Try balanced 2-line split first
+    total = len(text)
+    if total <= max_cpl * 2:
+        best = _find_balanced_split(words, max_cpl)
+        if best:
+            return best
+
+    # Fallback: greedy wrap
+    lines: list[str] = []
+    current = ''
+    for word in words:
+        if current and len(current) + 1 + len(word) > max_cpl:
+            lines.append(current)
+            current = word
+        else:
+            current = f'{current} {word}'.strip()
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _find_balanced_split(words: list[str], max_cpl: int) -> list[str] | None:
+    """Find split point where line1 >= line2 (top-heavy)."""
+    cumulative: list[str] = []
+    current = ''
+    for word in words:
+        current = f'{current} {word}'.strip()
+        cumulative.append(current)
+
+    full_text = cumulative[-1]
+    for i in range(len(words) - 1):
+        line1 = cumulative[i]
+        line2 = full_text[len(line1):].strip()
+        if len(line1) > max_cpl or len(line2) > max_cpl:
+            continue
+        if len(line1) >= len(line2):
+            return [line1, line2]
+
+    return None

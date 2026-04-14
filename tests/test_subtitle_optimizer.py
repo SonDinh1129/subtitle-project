@@ -297,3 +297,46 @@ class TestFixDuration:
         result, changed = fix_duration(blocks)
         assert changed
         assert all(b.duration <= MAX_DURATION for b in result)
+
+
+from models.subtitle_optimizer import wrap_text, MAX_CPL_VI
+
+
+class TestWrapText:
+    def test_short_text_single_line(self):
+        result = wrap_text("Short text", MAX_CPL_VI)
+        assert result == ["Short text"]
+
+    def test_balanced_two_lines_top_heavy(self):
+        # ~60 chars → 2 lines, line1 >= line2
+        text = "This is the first half of text and this is the second half"
+        result = wrap_text(text, MAX_CPL_VI)
+        assert len(result) == 2
+        assert len(result[0]) >= len(result[1])  # top-heavy
+
+    def test_respects_max_cpl(self):
+        text = "Word " * 20  # 100 chars
+        result = wrap_text(text.strip(), MAX_CPL_VI)
+        assert all(len(line) <= MAX_CPL_VI for line in result)
+
+    def test_greedy_fallback_when_balanced_fails(self):
+        # Text too long for 2 balanced lines
+        text = "Word " * 30  # 150 chars
+        result = wrap_text(text.strip(), MAX_CPL_VI)
+        assert len(result) > 2
+        assert all(len(line) <= MAX_CPL_VI for line in result)
+
+    def test_empty_text(self):
+        result = wrap_text("", MAX_CPL_VI)
+        assert result == ['']
+
+    def test_single_long_word(self):
+        # One word > MAX_CPL — greedy wrap puts it on its own line
+        text = "a" * 60
+        result = wrap_text(text, MAX_CPL_VI)
+        assert len(result) == 1  # single word, can't split
+
+    def test_vietnamese_text(self):
+        text = "Xin chào các bạn, hôm nay chúng ta sẽ học về lập trình Python"
+        result = wrap_text(text, MAX_CPL_VI)
+        assert all(len(line) <= MAX_CPL_VI for line in result)
