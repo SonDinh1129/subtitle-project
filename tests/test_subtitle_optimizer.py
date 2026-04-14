@@ -123,3 +123,74 @@ class TestSrtParseWrite:
         from models.subtitle_optimizer import _fmt_srt_time
         assert _fmt_srt_time(3723.456) == "01:02:03,456"
         assert _fmt_srt_time(0.0) == "00:00:00,000"
+
+
+from models.subtitle_optimizer import find_best_split, split_block, MAX_DURATION
+
+
+class TestFindBestSplit:
+    def test_prefers_period_near_mid(self):
+        text = "Hello world. This is a test sentence here"
+        mid = len(text) // 2  # ~20
+        pos = find_best_split(text, mid)
+        assert text[pos - 1] == '.'  # split after period
+
+    def test_prefers_comma_over_space(self):
+        text = "Hello world, this is a test sentence here"
+        mid = len(text) // 2
+        pos = find_best_split(text, mid)
+        assert text[pos - 1] == ','
+
+    def test_fallback_to_space(self):
+        text = "Hello world this is a test sentence here"
+        mid = len(text) // 2
+        pos = find_best_split(text, mid)
+        assert text[pos] == ' ' or text[pos - 1] == ' '
+
+    def test_last_resort_mid(self):
+        text = "abcdefghijklmnopqrstuvwxyz"  # no spaces or punctuation
+        mid = len(text) // 2
+        pos = find_best_split(text, mid)
+        assert pos == mid
+
+
+class TestSplitBlock:
+    def test_no_split_when_under_max(self):
+        b = SubtitleBlock(1, 0.0, 5.0, "Short text")
+        result = split_block(b)
+        assert len(result) == 1
+        assert result[0].text == "Short text"
+
+    def test_splits_long_block(self):
+        b = SubtitleBlock(1, 0.0, 14.0, "First part of text. Second part of text")
+        result = split_block(b)
+        assert len(result) >= 2
+        assert all(r.duration <= MAX_DURATION for r in result)
+
+    def test_recursive_very_long(self):
+        # 21s block should produce 3+ blocks
+        b = SubtitleBlock(1, 0.0, 21.0, "Part one text here. Part two text here. Part three text is here")
+        result = split_block(b)
+        assert len(result) >= 3
+        assert all(r.duration <= MAX_DURATION for r in result)
+
+    def test_duration_proportional_to_chars(self):
+        b = SubtitleBlock(1, 0.0, 10.0, "Short. A much longer second part of text")
+        result = split_block(b)
+        assert len(result) == 2
+        # Part with more chars gets more duration
+        assert result[1].duration > result[0].duration
+
+    def test_timestamps_continuous(self):
+        b = SubtitleBlock(1, 0.0, 14.0, "First part of the text. Second part of text")
+        result = split_block(b)
+        assert result[0].start == 0.0
+        assert result[-1].end == 14.0
+        for i in range(len(result) - 1):
+            assert result[i].end == result[i + 1].start
+
+    def test_short_text_long_duration(self):
+        # 10s block with only 2 chars — should not crash
+        b = SubtitleBlock(1, 0.0, 10.0, "OK")
+        result = split_block(b)
+        assert all(r.duration <= MAX_DURATION for r in result)

@@ -109,3 +109,72 @@ def write_srt(blocks: list[SubtitleBlock]) -> str:
             f"{block.text}\n"
         )
     return '\n'.join(parts)
+
+
+# ─────────────────────────────────────────────────────────────────
+# SPLIT HELPERS
+# ─────────────────────────────────────────────────────────────────
+
+def find_best_split(text: str, mid: int) -> int:
+    """Find best split position near mid."""
+    window = max(10, len(text) // 5)
+    search_start = max(0, mid - window)
+    search_end = min(len(text), mid + window)
+
+    # Priority: sentence-ending punctuation nearest to mid
+    for punct in ['.', '?', '!', ';', ',', '\u2014']:
+        best = -1
+        best_dist = float('inf')
+        for pos in range(search_start, search_end):
+            if text[pos] == punct:
+                dist = abs(pos - mid)
+                if dist < best_dist:
+                    best_dist = dist
+                    best = pos
+        if best != -1:
+            return best + 1  # split after punctuation
+
+    # Fallback: whitespace nearest to mid — prefer left so part2 gets more chars
+    for offset in range(1, window + 1):
+        if mid - offset >= 0 and text[mid - offset] == ' ':
+            return mid - offset
+        if mid + offset < len(text) and text[mid + offset] == ' ':
+            return mid + offset
+
+    # Last resort
+    return mid
+
+
+def split_block(block: SubtitleBlock) -> list[SubtitleBlock]:
+    """Split block > MAX_DURATION into 2+ blocks recursively.
+
+    Timing: duration allocated proportional to character count.
+    """
+    if block.duration <= MAX_DURATION:
+        return [block]
+
+    text = block.text.replace('\n', ' ')
+    if len(text) < 2:
+        # Text too short to split meaningfully — cap duration
+        return [replace(block, end=round(block.start + MAX_DURATION, 3))]
+
+    mid = len(text) // 2
+    split_pos = find_best_split(text, mid)
+
+    part1_text = text[:split_pos].strip()
+    part2_text = text[split_pos:].strip()
+
+    # Handle edge: split produced empty part
+    if not part1_text:
+        return [replace(block, text=part2_text)]
+    if not part2_text:
+        return [replace(block, text=part1_text)]
+
+    total_chars = len(part1_text) + len(part2_text)
+    ratio = len(part1_text) / total_chars if total_chars > 0 else 0.5
+    split_time = block.start + block.duration * ratio
+
+    part1 = SubtitleBlock(0, block.start, round(split_time, 3), part1_text)
+    part2 = SubtitleBlock(0, round(split_time, 3), block.end, part2_text)
+
+    return split_block(part1) + split_block(part2)
