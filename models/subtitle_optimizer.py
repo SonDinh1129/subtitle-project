@@ -178,3 +178,29 @@ def split_block(block: SubtitleBlock) -> list[SubtitleBlock]:
     part2 = SubtitleBlock(0, round(split_time, 3), block.end, part2_text)
 
     return split_block(part1) + split_block(part2)
+
+
+def extend_block(
+    block: SubtitleBlock, next_block: SubtitleBlock | None,
+) -> SubtitleBlock | list[SubtitleBlock]:
+    """Extend block < MIN_DURATION.
+
+    - No next_block: extend end to start + MIN_DURATION
+    - Has next_block with room: extend end, preserve MIN_GAP
+    - Extend would overlap next_block: merge both blocks
+    """
+    target_end = block.start + MIN_DURATION
+
+    if next_block is None:
+        return replace(block, end=target_end)
+
+    available = next_block.start - MIN_GAP
+    if target_end <= available:
+        return replace(block, end=target_end)
+    else:
+        merged_text = ' '.join([
+            block.text.replace('\n', ' '),
+            next_block.text.replace('\n', ' '),
+        ])
+        # Merged block may violate Duration/CPL/CPS — caught by next iteration
+        return [SubtitleBlock(0, block.start, next_block.end, merged_text)]

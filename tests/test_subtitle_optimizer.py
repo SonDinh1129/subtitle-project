@@ -194,3 +194,46 @@ class TestSplitBlock:
         b = SubtitleBlock(1, 0.0, 10.0, "OK")
         result = split_block(b)
         assert all(r.duration <= MAX_DURATION for r in result)
+
+
+from models.subtitle_optimizer import extend_block, MIN_DURATION, MIN_GAP
+
+
+class TestExtendBlock:
+    def test_extend_no_next_block(self):
+        b = SubtitleBlock(1, 10.0, 10.3, "Hi")
+        result = extend_block(b, None)
+        assert not isinstance(result, list)
+        assert result.end == 10.0 + MIN_DURATION  # 11.0
+
+    def test_extend_with_room(self):
+        b = SubtitleBlock(1, 10.0, 10.3, "Hi")
+        next_b = SubtitleBlock(2, 15.0, 18.0, "Next")
+        result = extend_block(b, next_b)
+        assert not isinstance(result, list)
+        assert result.end == 11.0
+        assert result.start == 10.0  # unchanged
+
+    def test_merge_when_overlap(self):
+        b = SubtitleBlock(1, 10.0, 10.3, "Hi")
+        next_b = SubtitleBlock(2, 10.5, 13.0, "Next")
+        # target_end = 11.0, available = 10.5 - 0.083 = 10.417 < 11.0 → merge
+        result = extend_block(b, next_b)
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].start == 10.0
+        assert result[0].end == 13.0
+        assert "Hi" in result[0].text
+        assert "Next" in result[0].text
+
+    def test_merge_normalizes_newlines(self):
+        b = SubtitleBlock(1, 10.0, 10.3, "Line1\nLine2")
+        next_b = SubtitleBlock(2, 10.5, 13.0, "Line3\nLine4")
+        result = extend_block(b, next_b)
+        assert isinstance(result, list)
+        assert '\n' not in result[0].text  # newlines stripped
+
+    def test_immutable_original_unchanged(self):
+        b = SubtitleBlock(1, 10.0, 10.3, "Hi")
+        extend_block(b, None)
+        assert b.end == 10.3  # original not mutated
