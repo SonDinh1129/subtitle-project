@@ -19,6 +19,16 @@ export async function getAuthHeader(): Promise<string | null> {
   return `Bearer ${session.access_token}`;
 }
 
+/**
+ * Authenticated fetch using a pre-resolved token.
+ * Use this when you already have the access_token (e.g. during auth state changes).
+ */
+export async function authFetchWithToken(path: string, token: string): Promise<Response> {
+  return fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+  });
+}
+
 /** Authenticated fetch for JSON endpoints. Throws if not authenticated. */
 export async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const token = await getAuthHeader();

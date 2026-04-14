@@ -339,6 +339,21 @@ def split_long_segment(seg: dict, max_duration: float = 25.0) -> list[dict]:
     return result
 
 
+def _prepare_segments(audio_path: str, min_duration: float = 2.0) -> list[dict]:
+    """Run VAD → split → merge → encode segments for Colab.
+
+    Raises RuntimeError if no speech is detected.
+    """
+    segments, wav = detect_speech_segments(audio_path)
+    if not segments:
+        raise RuntimeError("No speech detected in the video.")
+    split_segs: list[dict] = []
+    for s in segments:
+        split_segs.extend(split_long_segment(s, max_duration=25.0))
+    segments = merge_short_segments(split_segs, min_duration=min_duration, max_duration=25.0)
+    return encode_segments_for_colab(segments, wav)
+
+
 def _cleanup_job_queue(job_id: str) -> None:
     """Remove the event queue for a completed/failed job to free memory."""
     with _job_event_lock:
@@ -489,17 +504,10 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
 
         # ── Step 2: VAD ────────────────────────────────────────────
         update_job(job_id, status=JobStatus.VAD, progress=20)
-        segments, wav = detect_speech_segments(audio_path)
-        if not segments:
-            raise RuntimeError("No speech detected in the video.")
-        split_segs: list[dict] = []
-        for s in segments:
-            split_segs.extend(split_long_segment(s, max_duration=25.0))
-        segments = merge_short_segments(split_segs, min_duration=2.0, max_duration=25.0)
 
         # ── Step 3: Encode + send to Colab ─────────────────────────
         update_job(job_id, status=JobStatus.TRANSCRIBING, progress=40)
-        segments_data = encode_segments_for_colab(segments, wav)
+        segments_data = _prepare_segments(audio_path, min_duration=2.0)
 
         client = ColabClient(colab_url)
         result = client.transcribe_translate(segments_data, translation_mode)
@@ -559,16 +567,9 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
         extract_audio(video_path, audio_path)
 
         update_job(job_id, status=JobStatus.VAD, progress=20)
-        segments, wav = detect_speech_segments(audio_path)
-        if not segments:
-            raise RuntimeError("No speech detected in the video.")
-        split_segs_rt: list[dict] = []
-        for s in segments:
-            split_segs_rt.extend(split_long_segment(s, max_duration=25.0))
-        segments = merge_short_segments(split_segs_rt, min_duration=1.5, max_duration=25.0)
 
         update_job(job_id, status=JobStatus.TRANSCRIBING, progress=40)
-        segments_data = encode_segments_for_colab(segments, wav)
+        segments_data = _prepare_segments(audio_path, min_duration=1.5)
         total_segments = len(segments_data)
         if total_segments == 0:
             raise RuntimeError("No valid audio segments to process.")

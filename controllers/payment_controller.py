@@ -10,12 +10,13 @@ import os
 import hmac
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 
 import requests
-from flask import Blueprint, g, request, jsonify, current_app
+from flask import Blueprint, g, request, jsonify
 
-from middleware.auth import require_auth, get_profile, is_premium
+from middleware.auth import require_auth, get_profile, is_premium, _get_supabase_service
 from extensions import limiter
 
 payment_bp = Blueprint("payment", __name__)
@@ -25,32 +26,21 @@ PAYOS_API_BASE = "https://api-merchant.payos.vn"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-def _verify_payos_signature(data: dict, received_signature: str) -> bool:
-    """Verify PayOS HMAC-SHA256 webhook signature."""
-    checksum_key = os.environ.get("PAYOS_CHECKSUM_KEY", "")
-    if not checksum_key:
-        return False
-
-    # Sort keys and build canonical string
-    sorted_data = dict(sorted(data.items()))
-    canonical = "&".join(f"{k}={v}" for k, v in sorted_data.items() if k != "signature")
-
-    expected = hmac.new(
-        checksum_key.encode("utf-8"),
+def _build_payos_signature(data: dict) -> str:
+    """Sign PayOS fields with HMAC-SHA256. Excludes 'signature' key."""
+    canonical = "&".join(f"{k}={v}" for k, v in sorted(data.items()) if k != "signature")
+    return hmac.new(
+        os.environ.get("PAYOS_CHECKSUM_KEY", "").encode("utf-8"),
         canonical.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
 
-    return hmac.compare_digest(expected, received_signature)
 
-
-def _get_supabase_service():
-    """Get Supabase service client."""
-    from supabase import create_client
-    return create_client(
-        current_app.config["SUPABASE_URL"],
-        current_app.config["SUPABASE_SERVICE_ROLE_KEY"],
-    )
+def _verify_payos_signature(data: dict, received_signature: str) -> bool:
+    """Verify PayOS HMAC-SHA256 webhook signature."""
+    if not os.environ.get("PAYOS_CHECKSUM_KEY"):
+        return False
+    return hmac.compare_digest(_build_payos_signature(data), received_signature)
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
@@ -80,12 +70,10 @@ def create_order():
         return jsonify({"error": "PayOS not configured"}), 503
 
     # Build order ID (unique, numeric, max 15 chars)
-    import time
     order_code = int(time.time() * 1000) % 10**13  # 13-digit ms timestamp
 
     amount = 99000  # VND
 
-    # Build signature
     sig_data = {
         "amount": amount,
         "cancelUrl": f"{frontend_url}/upgrade",
@@ -93,13 +81,7 @@ def create_order():
         "orderCode": order_code,
         "returnUrl": f"{frontend_url}/upgrade/success",
     }
-    sorted_sig = dict(sorted(sig_data.items()))
-    canonical = "&".join(f"{k}={v}" for k, v in sorted_sig.items())
-    signature = hmac.new(
-        payos_checksum.encode("utf-8"),
-        canonical.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    signature = _build_payos_signature(sig_data)
 
     payload = {
         **sig_data,

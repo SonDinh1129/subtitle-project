@@ -56,7 +56,7 @@ def create_app() -> Flask:
 
     # ── CORS (allow React dev server) ─────────────────────────────
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    CORS(app, resources={r"/api/*": {"origins": [frontend_url, "http://localhost:5173"]}})
+    CORS(app, resources={r"/api/*": {"origins": frontend_url}})
 
     # ── Rate Limiter ──────────────────────────────────────────────
     limiter.init_app(app)

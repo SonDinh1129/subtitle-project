@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
+import { authFetchWithToken } from '../../lib/api'
 
 export interface UserProfile {
   id: string
@@ -25,13 +26,9 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api').replace(/\/$/, '')
-
 async function fetchProfile(accessToken: string): Promise<UserProfile | null> {
   try {
-    const res = await fetch(`${BASE}/auth/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    const res = await authFetchWithToken('/auth/me', accessToken)
     if (!res.ok) return null
     return res.json()
   } catch {

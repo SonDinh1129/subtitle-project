@@ -29,7 +29,7 @@ from models.subtitle_model import (
     OUTPUT_DIR,
     get_job_event_queue,
 )
-from middleware.auth import require_auth, get_profile, is_premium, needs_reset, reset_usage
+from middleware.auth import require_auth, require_premium, get_profile, is_premium, needs_reset, reset_usage, _get_supabase_service
 from extensions import limiter
 from models.subtitle_optimizer import (
     parse_srt, write_srt, optimize_subtitles, get_optimization_stats,
@@ -167,12 +167,7 @@ def upload_video():  # noqa: C901
 
     # Increment usage counter atomically
     try:
-        from supabase import create_client
-        supabase = create_client(
-            current_app.config["SUPABASE_URL"],
-            current_app.config["SUPABASE_SERVICE_ROLE_KEY"],
-        )
-        supabase.rpc("increment_video_count", {"uid": g.user_id}).execute()
+        _get_supabase_service().rpc("increment_video_count", {"uid": g.user_id}).execute()
     except Exception:
         pass  # Non-fatal
 
@@ -325,8 +320,9 @@ def download_srt(job_id: str, lang: str):
     )
 
 @subtitle_bp.route('/video/<filename>')
+@require_auth
 def serve_video(filename):
-    return send_from_directory('uploads', filename)
+    return send_from_directory(str(UPLOAD_DIR), filename)
 
 
 @subtitle_bp.post("/export")
@@ -387,16 +383,16 @@ def download_exported_video(filename: str):
 # OPTIMIZE (Premium feature)
 # ─────────────────────────────────────────────────────────────────
 
-@subtitle_bp.route("/api/jobs/<job_id>/optimize", methods=["POST"])
-# TEMPORARY: @require_auth and @require_premium not yet applied.
-# DO NOT deploy to production without adding these decorators.
-# See: docs/superpowers/specs/2026-04-13-auth-premium-payment-design.md Phase 4
-# TODO: Add job ownership check (job["user_id"] != g.user_id) when auth is ready
+@subtitle_bp.route("/jobs/<job_id>/optimize", methods=["POST"])
+@require_auth
+@require_premium
 def optimize_job_subtitles(job_id):
     """Premium feature: optimize Vietnamese SRT to broadcast standards."""
     job = get_job(job_id)
     if not job:
         return jsonify(error="Job not found"), 404
+    if job.get("user_id") and job["user_id"] != g.user_id:
+        return jsonify(error="Forbidden"), 403
 
     vi_srt_path = job.get("vi_srt_path")
     if not vi_srt_path or not os.path.exists(vi_srt_path):
