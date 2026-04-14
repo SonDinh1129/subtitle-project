@@ -17,6 +17,8 @@ export default defineConfig({
     },
   },
   build: {
+    outDir: 'views/static',
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks(id) {
