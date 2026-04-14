@@ -17,17 +17,22 @@ from pathlib import Path
 from flask import (
     Blueprint, request, jsonify,
     send_file, send_from_directory, current_app,
-    Response, stream_with_context,
+    Response, stream_with_context, g,
 )
 from werkzeug.utils import secure_filename
 
 from models.subtitle_model import (
-    create_job, get_job, run_pipeline,
+    create_job, get_job, update_job, run_pipeline,
     run_pipeline_realtime,
     export_burned_video,
     JobStatus, UPLOAD_DIR,
     OUTPUT_DIR,
     get_job_event_queue,
+)
+from middleware.auth import require_auth, get_profile, is_premium, needs_reset, reset_usage
+from extensions import limiter
+from models.subtitle_optimizer import (
+    parse_srt, write_srt, optimize_subtitles, get_optimization_stats,
 )
 
 # ─────────────────────────────────────────────────────────────────
@@ -42,6 +47,18 @@ MAX_CONTENT_MB     = 2048          # 2 GB
 
 def _allowed(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _validate_video_magic(file_stream) -> bool:
+    """Check file magic bytes to verify it's actually a video."""
+    header = file_stream.read(12)
+    file_stream.seek(0)
+    if len(header) < 4:
+        return False
+    if header[4:8] == b"ftyp":          return True  # MP4/MOV
+    if header[:4] == b"\x1a\x45\xdf\xa3": return True  # MKV/WebM
+    if header[:4] == b"RIFF":           return True  # AVI
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -76,7 +93,9 @@ def health():
 
 
 @subtitle_bp.post("/upload")
-def upload_video():
+@require_auth
+@limiter.limit("5/minute")
+def upload_video():  # noqa: C901
     """
     Upload video → tạo job → chạy pipeline trong background.
 
@@ -88,6 +107,18 @@ def upload_video():
     Response 200:
         { job_id, status }
     """
+    # ── Free tier checks ───────────────────────────────────────────
+    profile = get_profile(g.user_id)
+    if not profile:
+        return jsonify({"error": "Profile not found"}), 404
+
+    premium = is_premium(profile)
+
+    # Lazy reset monthly counter if new month
+    if needs_reset(profile):
+        reset_usage(g.user_id)
+        profile = get_profile(g.user_id) or profile  # re-fetch after reset
+
     # ── Validate file ──────────────────────────────────────────────
     if "file" not in request.files:
         return jsonify({"error": "No file field in request"}), 400
@@ -101,6 +132,9 @@ def upload_video():
             "error": f"Unsupported format. Allowed: {', '.join(ALLOWED_EXTENSIONS).upper()}"
         }), 415
 
+    if not _validate_video_magic(file.stream):
+        return jsonify({"error": "File content does not match a supported video format"}), 415
+
     # ── Save video to disk ─────────────────────────────────────────
     translation_mode = request.form.get("translation_mode", "segment")
     if translation_mode not in ("segment", "sentence"):
@@ -109,20 +143,38 @@ def upload_video():
     if process_mode not in ("normal", "realtime"):
         process_mode = "normal"
 
-    safe_name  = secure_filename(file.filename)
+    # Gate: realtime requires premium
+    if process_mode == "realtime" and not premium:
+        return jsonify({"error": "Realtime mode requires premium", "code": "PREMIUM_REQUIRED"}), 403
+
+    # Gate: free tier video limit (5/month)
+    videos_used = profile.get("videos_used_this_month", 0)
+    if not premium and videos_used >= 5:
+        return jsonify({"error": "Monthly video limit reached (5/month)", "code": "LIMIT_REACHED"}), 403
+
+    safe_name  = secure_filename(file.filename)[:200]
     job        = create_job(
         filename         = safe_name,
         translation_mode = translation_mode,
         video_path       = "",            # will be updated below
+        user_id          = g.user_id,
     )
     job_id     = job["job_id"]
     video_path = str(UPLOAD_DIR / f"{job_id}_{safe_name}")
 
     file.save(video_path)
-
-    # Patch video_path into job record now that we know it
-    from models.subtitle_model import update_job
     update_job(job_id, video_path=video_path)
+
+    # Increment usage counter atomically
+    try:
+        from supabase import create_client
+        supabase = create_client(
+            current_app.config["SUPABASE_URL"],
+            current_app.config["SUPABASE_SERVICE_ROLE_KEY"],
+        )
+        supabase.rpc("increment_video_count", {"uid": g.user_id}).execute()
+    except Exception:
+        pass  # Non-fatal
 
     # ── Start pipeline in background thread ───────────────────────
     colab_url = current_app.config["COLAB_URL"]
@@ -134,11 +186,14 @@ def upload_video():
 
 
 @subtitle_bp.get("/jobs/<job_id>/stream")
+@require_auth
 def stream_job_realtime(job_id: str):
     """Server-Sent Events stream for realtime subtitle segments."""
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
+    if job.get("user_id") and job["user_id"] != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
 
     def _event(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -195,6 +250,7 @@ def stream_job_realtime(job_id: str):
 
 
 @subtitle_bp.get("/jobs/<job_id>")
+@require_auth
 def get_job_status(job_id: str):
     """
     Poll trạng thái và tiến trình của một job.
@@ -211,6 +267,8 @@ def get_job_status(job_id: str):
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
+    if job.get("user_id") and job["user_id"] != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
 
     # Chỉ trả về những field an toàn (không expose đường dẫn nội bộ)
     payload = {
@@ -233,6 +291,7 @@ def get_job_status(job_id: str):
 
 
 @subtitle_bp.get("/jobs/<job_id>/download/<lang>")
+@require_auth
 def download_srt(job_id: str, lang: str):
     """
     Tải file SRT đã tạo.
@@ -247,6 +306,8 @@ def download_srt(job_id: str, lang: str):
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
+    if job.get("user_id") and job["user_id"] != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
     if job["status"] != JobStatus.DONE:
         return jsonify({"error": f"Job not ready (status: {job['status']})"}), 409
 
@@ -269,6 +330,7 @@ def serve_video(filename):
 
 
 @subtitle_bp.post("/export")
+@require_auth
 def export_video():
     """Export a burned-subtitle video in selected resolution."""
     payload = request.get_json(silent=True) or {}
@@ -286,6 +348,8 @@ def export_video():
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
+    if job.get("user_id") and job["user_id"] != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
     if job.get("status") != JobStatus.DONE:
         return jsonify({"error": f"Job not ready (status: {job.get('status')})"}), 409
 
@@ -316,4 +380,45 @@ def download_exported_video(filename: str):
         mimetype="video/mp4",
         as_attachment=True,
         download_name=safe_name,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────
+# OPTIMIZE (Premium feature)
+# ─────────────────────────────────────────────────────────────────
+
+@subtitle_bp.route("/api/jobs/<job_id>/optimize", methods=["POST"])
+# TEMPORARY: @require_auth and @require_premium not yet applied.
+# DO NOT deploy to production without adding these decorators.
+# See: docs/superpowers/specs/2026-04-13-auth-premium-payment-design.md Phase 4
+# TODO: Add job ownership check (job["user_id"] != g.user_id) when auth is ready
+def optimize_job_subtitles(job_id):
+    """Premium feature: optimize Vietnamese SRT to broadcast standards."""
+    job = get_job(job_id)
+    if not job:
+        return jsonify(error="Job not found"), 404
+
+    vi_srt_path = job.get("vi_srt_path")
+    if not vi_srt_path or not os.path.exists(vi_srt_path):
+        return jsonify(error="Vietnamese SRT not found"), 404
+
+    with open(vi_srt_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    blocks = parse_srt(content)
+    optimized = optimize_subtitles(blocks)
+    result_srt = write_srt(optimized)
+
+    # Write optimized file (safe filename via pathlib)
+    p = Path(vi_srt_path)
+    opt_path = str(p.with_stem(p.stem + "_optimized"))
+    with open(opt_path, "w", encoding="utf-8") as f:
+        f.write(result_srt)
+
+    update_job(job_id, vi_srt_optimized_path=opt_path)
+
+    return jsonify(
+        message="Optimized successfully",
+        path=opt_path,
+        stats=get_optimization_stats(blocks, optimized),
     )

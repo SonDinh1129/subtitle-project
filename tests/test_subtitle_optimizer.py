@@ -604,3 +604,31 @@ class TestOptimizeSubtitles:
         assert len(reparsed) == len(optimized)
         for b in reparsed:
             assert b.duration <= MAX_DURATION + 0.01
+
+
+from models.subtitle_optimizer import get_optimization_stats
+
+
+class TestGetOptimizationStats:
+    def test_basic_stats(self):
+        before = [
+            SubtitleBlock(1, 0.0, 2.0, "A" * 50),  # CPS=25, longest_line=50
+            SubtitleBlock(2, 3.0, 6.0, "Short"),     # CPS=1.67, longest_line=5
+        ]
+        after = [
+            SubtitleBlock(1, 0.0, 3.0, "A" * 50),   # CPS=16.7, longest_line=50
+            SubtitleBlock(2, 4.0, 7.0, "Short"),
+        ]
+        stats = get_optimization_stats(before, after)
+        assert stats["blocks_before"] == 2
+        assert stats["blocks_after"] == 2
+        assert stats["cps_violations_before"] == 1
+        assert stats["cps_violations_after"] == 0
+        assert stats["cpl_violations_before"] == 1  # 50 > 47
+        assert stats["cpl_violations_after"] == 1
+        assert isinstance(stats["avg_cps_before"], float)
+
+    def test_empty_lists(self):
+        stats = get_optimization_stats([], [])
+        assert stats["blocks_before"] == 0
+        assert stats["avg_cps_before"] == 0

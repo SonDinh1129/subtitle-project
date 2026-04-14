@@ -556,3 +556,23 @@ def optimize_subtitles(blocks: list[SubtitleBlock]) -> list[SubtitleBlock]:
             )
 
     return blocks
+
+
+# ─────────────────────────────────────────────────────────────────
+# STATS
+# ─────────────────────────────────────────────────────────────────
+
+def get_optimization_stats(
+    before: list[SubtitleBlock], after: list[SubtitleBlock],
+) -> dict:
+    """Compare before/after optimization metrics."""
+    return {
+        "blocks_before": len(before),
+        "blocks_after": len(after),
+        "cps_violations_before": sum(1 for b in before if b.cps > MAX_CPS),
+        "cps_violations_after": sum(1 for b in after if b.cps > MAX_CPS),
+        "cpl_violations_before": sum(1 for b in before if b.longest_line > MAX_CPL_VI),
+        "cpl_violations_after": sum(1 for b in after if b.longest_line > MAX_CPL_VI),
+        "avg_cps_before": round(sum(b.cps for b in before) / len(before), 1) if before else 0,
+        "avg_cps_after": round(sum(b.cps for b in after) / len(after), 1) if after else 0,
+    }
