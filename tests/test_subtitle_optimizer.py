@@ -4,3 +4,122 @@
 def test_smoke():
     """Verify pytest runs."""
     assert 1 + 1 == 2
+
+
+from models.subtitle_optimizer import SubtitleBlock
+
+
+class TestSubtitleBlock:
+    def test_duration(self):
+        b = SubtitleBlock(1, 1.0, 4.0, "Hello world")
+        assert b.duration == 3.0
+
+    def test_cps_normal(self):
+        b = SubtitleBlock(1, 0.0, 5.0, "Hello world")  # 11 chars / 5s = 2.2
+        assert b.cps == 2.2
+
+    def test_cps_zero_duration(self):
+        b = SubtitleBlock(1, 1.0, 1.0, "Hello")
+        assert b.cps == 0.0
+
+    def test_cps_strips_newlines(self):
+        b = SubtitleBlock(1, 0.0, 10.0, "Hello\nworld")  # 10 chars (no \n) / 10s
+        assert b.cps == 1.0
+
+    def test_lines(self):
+        b = SubtitleBlock(1, 0.0, 1.0, "Line one\nLine two")
+        assert b.lines == ["Line one", "Line two"]
+
+    def test_longest_line(self):
+        b = SubtitleBlock(1, 0.0, 1.0, "Short\nA longer line")
+        assert b.longest_line == 13  # "A longer line"
+
+    def test_longest_line_empty(self):
+        b = SubtitleBlock(1, 0.0, 1.0, "")
+        assert b.longest_line == 0
+
+
+from models.subtitle_optimizer import parse_srt, write_srt
+
+
+class TestSrtParseWrite:
+    def test_parse_srt_basic(self):
+        content = (
+            "1\n"
+            "00:00:01,000 --> 00:00:04,000\n"
+            "Hello world\n"
+            "\n"
+            "2\n"
+            "00:00:05,000 --> 00:00:08,500\n"
+            "Second line\n"
+            "\n"
+        )
+        blocks = parse_srt(content)
+        assert len(blocks) == 2
+        assert blocks[0].index == 1
+        assert blocks[0].start == 1.0
+        assert blocks[0].end == 4.0
+        assert blocks[0].text == "Hello world"
+        assert blocks[1].start == 5.0
+        assert blocks[1].end == 8.5
+
+    def test_parse_srt_multiline_text(self):
+        content = (
+            "1\n"
+            "00:00:01,000 --> 00:00:04,000\n"
+            "Line one\n"
+            "Line two\n"
+            "\n"
+        )
+        blocks = parse_srt(content)
+        assert blocks[0].text == "Line one\nLine two"
+
+    def test_parse_srt_windows_line_endings(self):
+        content = "1\r\n00:00:01,000 --> 00:00:04,000\r\nHello\r\n\r\n"
+        blocks = parse_srt(content)
+        assert len(blocks) == 1
+        assert blocks[0].text == "Hello"
+
+    def test_parse_srt_with_bom(self):
+        content = "\ufeff1\n00:00:01,000 --> 00:00:04,000\nHello\n\n"
+        blocks = parse_srt(content)
+        assert len(blocks) == 1
+
+    def test_parse_srt_empty(self):
+        assert parse_srt("") == []
+        assert parse_srt("   ") == []
+
+    def test_write_srt(self):
+        blocks = [
+            SubtitleBlock(1, 1.0, 4.0, "Hello world"),
+            SubtitleBlock(2, 5.0, 8.5, "Second line"),
+        ]
+        result = write_srt(blocks)
+        assert "00:00:01,000 --> 00:00:04,000" in result
+        assert "Hello world" in result
+        assert "00:00:05,000 --> 00:00:08,500" in result
+
+    def test_roundtrip(self):
+        """parse -> write -> parse gives identical blocks."""
+        original = (
+            "1\n00:00:01,000 --> 00:00:04,000\nHello world\n\n"
+            "2\n00:00:05,500 --> 00:00:08,200\nLine one\nLine two\n\n"
+        )
+        blocks1 = parse_srt(original)
+        srt_text = write_srt(blocks1)
+        blocks2 = parse_srt(srt_text)
+        assert len(blocks1) == len(blocks2)
+        for b1, b2 in zip(blocks1, blocks2):
+            assert b1.start == b2.start
+            assert b1.end == b2.end
+            assert b1.text == b2.text
+
+    def test_parse_srt_time(self):
+        from models.subtitle_optimizer import _parse_srt_time
+        assert _parse_srt_time("01:02:03,456") == 3723.456
+        assert _parse_srt_time("00:00:00,000") == 0.0
+
+    def test_fmt_srt_time(self):
+        from models.subtitle_optimizer import _fmt_srt_time
+        assert _fmt_srt_time(3723.456) == "01:02:03,456"
+        assert _fmt_srt_time(0.0) == "00:00:00,000"
