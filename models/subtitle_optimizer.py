@@ -297,3 +297,83 @@ def _find_balanced_split(words: list[str], max_cpl: int) -> list[str] | None:
             return [line1, line2]
 
     return None
+
+
+# ─────────────────────────────────────────────────────────────────
+# PIPELINE STEP 2: fix_cpl
+# ─────────────────────────────────────────────────────────────────
+
+def fix_cpl(
+    blocks: list[SubtitleBlock], max_cpl: int = MAX_CPL_VI,
+) -> tuple[list[SubtitleBlock], bool]:
+    """Wrap text so each line <= max_cpl, max MAX_LINES lines.
+
+    If text cannot fit in MAX_LINES x max_cpl, split into multiple blocks.
+    Empty-text blocks are removed.
+    """
+    result: list[SubtitleBlock] = []
+    changed = False
+
+    for block in blocks:
+        flat_text = block.text.replace('\n', ' ')
+
+        if not flat_text.strip():
+            changed = True
+            continue
+
+        if len(flat_text) <= max_cpl:
+            if block.text != flat_text:
+                result.append(replace(block, text=flat_text))
+                changed = True
+            else:
+                result.append(block)
+            continue
+
+        lines = wrap_text(flat_text, max_cpl)
+
+        if len(lines) <= MAX_LINES:
+            new_text = '\n'.join(lines)
+            if new_text != block.text:
+                result.append(replace(block, text=new_text))
+                changed = True
+            else:
+                result.append(block)
+        else:
+            # Text too long for MAX_LINES — split block
+            # New blocks may have duration < MIN_DURATION — caught by next iteration
+            splits = _split_block_by_text(block, lines)
+            result.extend(splits)
+            changed = True
+
+    return result, changed
+
+
+def _split_block_by_text(
+    block: SubtitleBlock, lines: list[str],
+) -> list[SubtitleBlock]:
+    """Split block when text needs > MAX_LINES lines.
+
+    Groups lines into chunks of MAX_LINES, allocates duration
+    proportional to character count.
+    """
+    groups: list[str] = []
+    for i in range(0, len(lines), MAX_LINES):
+        group_lines = lines[i:i + MAX_LINES]
+        groups.append('\n'.join(group_lines))
+
+    total_chars = sum(len(g.replace('\n', '')) for g in groups)
+    blocks_out: list[SubtitleBlock] = []
+    current_start = block.start
+
+    for g in groups:
+        ratio = len(g.replace('\n', '')) / total_chars if total_chars > 0 else 1.0
+        duration = block.duration * ratio
+        end = round(current_start + duration, 3)
+        blocks_out.append(SubtitleBlock(0, round(current_start, 3), end, g))
+        current_start = end
+
+    # Ensure last block ends exactly at original end
+    if blocks_out:
+        blocks_out[-1] = replace(blocks_out[-1], end=block.end)
+
+    return blocks_out

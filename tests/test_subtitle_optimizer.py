@@ -340,3 +340,61 @@ class TestWrapText:
         text = "Xin chào các bạn, hôm nay chúng ta sẽ học về lập trình Python"
         result = wrap_text(text, MAX_CPL_VI)
         assert all(len(line) <= MAX_CPL_VI for line in result)
+
+
+from models.subtitle_optimizer import fix_cpl, MAX_LINES
+
+
+class TestFixCpl:
+    def test_no_changes_short_text(self):
+        blocks = [SubtitleBlock(1, 0.0, 3.0, "Short text")]
+        result, changed = fix_cpl(blocks)
+        assert not changed
+        assert result[0].text == "Short text"
+
+    def test_flattens_unnecessary_newline(self):
+        blocks = [SubtitleBlock(1, 0.0, 3.0, "Short\ntext")]  # 10 chars, fits in 1 line
+        result, changed = fix_cpl(blocks)
+        assert changed
+        assert result[0].text == "Short text"
+
+    def test_wraps_long_line(self):
+        text = "This is a fairly long subtitle text that definitely exceeds forty seven characters limit"
+        blocks = [SubtitleBlock(1, 0.0, 5.0, text)]
+        result, changed = fix_cpl(blocks)
+        assert changed
+        assert '\n' in result[0].text
+        for line in result[0].lines:
+            assert len(line) <= MAX_CPL_VI
+
+    def test_splits_when_exceeds_max_lines(self):
+        # Text that needs >2 lines
+        text = "Word " * 40  # 200 chars → needs ~5 lines at 47 CPL
+        blocks = [SubtitleBlock(1, 0.0, 10.0, text.strip())]
+        result, changed = fix_cpl(blocks)
+        assert changed
+        assert len(result) > 1  # split into multiple blocks
+        for b in result:
+            assert len(b.lines) <= MAX_LINES
+
+    def test_removes_empty_blocks(self):
+        blocks = [
+            SubtitleBlock(1, 0.0, 3.0, ""),
+            SubtitleBlock(2, 4.0, 7.0, "Normal text"),
+        ]
+        result, changed = fix_cpl(blocks)
+        assert changed
+        assert len(result) == 1
+        assert result[0].text == "Normal text"
+
+    def test_split_blocks_have_continuous_timestamps(self):
+        text = "Word " * 40
+        blocks = [SubtitleBlock(1, 0.0, 10.0, text.strip())]
+        result, _ = fix_cpl(blocks)
+        assert result[0].start == 0.0
+        assert result[-1].end == 10.0
+
+    def test_unchanged_returns_false(self):
+        blocks = [SubtitleBlock(1, 0.0, 3.0, "Short text")]
+        _, changed = fix_cpl(blocks)
+        assert not changed
