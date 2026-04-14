@@ -237,3 +237,63 @@ class TestExtendBlock:
         b = SubtitleBlock(1, 10.0, 10.3, "Hi")
         extend_block(b, None)
         assert b.end == 10.3  # original not mutated
+
+
+from models.subtitle_optimizer import fix_duration
+
+
+class TestFixDuration:
+    def test_no_changes(self):
+        blocks = [
+            SubtitleBlock(1, 0.0, 3.0, "Normal block"),
+            SubtitleBlock(2, 4.0, 7.0, "Another normal"),
+        ]
+        result, changed = fix_duration(blocks)
+        assert not changed
+        assert len(result) == 2
+
+    def test_splits_long_block(self):
+        blocks = [SubtitleBlock(1, 0.0, 10.0, "First part here. Second part here")]
+        result, changed = fix_duration(blocks)
+        assert changed
+        assert len(result) >= 2
+        assert all(b.duration <= MAX_DURATION for b in result)
+
+    def test_extends_short_block(self):
+        blocks = [SubtitleBlock(1, 0.0, 0.5, "Hi")]
+        result, changed = fix_duration(blocks)
+        assert changed
+        assert result[0].duration >= MIN_DURATION
+
+    def test_merge_short_with_next(self):
+        blocks = [
+            SubtitleBlock(1, 10.0, 10.3, "Hi"),
+            SubtitleBlock(2, 10.4, 13.0, "Next block"),
+        ]
+        result, changed = fix_duration(blocks)
+        assert changed
+        # Merged into one block — skip_next ensures next isn't double-processed
+        assert len(result) == 1
+        assert result[0].start == 10.0
+        assert result[0].end == 13.0
+
+    def test_skip_next_after_merge(self):
+        blocks = [
+            SubtitleBlock(1, 10.0, 10.3, "Hi"),      # < MIN_DURATION → merge with next
+            SubtitleBlock(2, 10.4, 13.0, "Next"),     # absorbed by merge
+            SubtitleBlock(3, 14.0, 17.0, "Third"),    # should pass through normally
+        ]
+        result, changed = fix_duration(blocks)
+        assert changed
+        assert len(result) == 2  # merged(1+2) + 3
+        assert result[1].text == "Third"
+
+    def test_mixed_violations(self):
+        blocks = [
+            SubtitleBlock(1, 0.0, 10.0, "Long text here. Split needed text"),  # > 7s
+            SubtitleBlock(2, 11.0, 14.0, "Normal"),
+            SubtitleBlock(3, 15.0, 15.3, "Short"),   # < 1s
+        ]
+        result, changed = fix_duration(blocks)
+        assert changed
+        assert all(b.duration <= MAX_DURATION for b in result)

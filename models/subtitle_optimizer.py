@@ -204,3 +204,36 @@ def extend_block(
         ])
         # Merged block may violate Duration/CPL/CPS — caught by next iteration
         return [SubtitleBlock(0, block.start, next_block.end, merged_text)]
+
+
+# ─────────────────────────────────────────────────────────────────
+# PIPELINE STEP 1: fix_duration
+# ─────────────────────────────────────────────────────────────────
+
+def fix_duration(blocks: list[SubtitleBlock]) -> tuple[list[SubtitleBlock], bool]:
+    """Split blocks > MAX_DURATION, extend blocks < MIN_DURATION."""
+    result: list[SubtitleBlock] = []
+    changed = False
+    skip_next = False
+
+    for i, block in enumerate(blocks):
+        if skip_next:
+            skip_next = False
+            continue
+
+        if block.duration > MAX_DURATION:
+            result.extend(split_block(block))
+            changed = True
+        elif block.duration < MIN_DURATION:
+            next_block = blocks[i + 1] if i + 1 < len(blocks) else None
+            extended = extend_block(block, next_block)
+            if isinstance(extended, list):
+                result.extend(extended)
+                skip_next = True  # next_block absorbed into merge
+            else:
+                result.append(extended)
+            changed = True
+        else:
+            result.append(block)
+
+    return result, changed
