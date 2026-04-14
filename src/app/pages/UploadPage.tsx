@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { uploadVideo, pollUntilDone, STATUS_MESSAGES, type ProcessMode } from "../../lib/api";
 import { useUiPreferences } from "../context/UiPreferencesContext";
+import { useAuth } from "../context/AuthContext";
 import {
   Upload,
   FileVideo,
@@ -15,6 +16,8 @@ import {
   AlertCircle,
   Play,
   Zap,
+  Lock,
+  Crown,
 } from "lucide-react";
 
 const SUPPORTED_FORMATS = ["MP4", "MOV", "MKV", "AVI", "WEBM"];
@@ -35,8 +38,10 @@ function formatDuration(secs: number): string {
 
 export function UploadPage() {
   const { language: appLanguage } = useUiPreferences();
+  const { isPremium, profile } = useAuth();
   const isVi = appLanguage === "vi";
   const [state, setState] = useState<UploadState>("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -66,6 +71,7 @@ export function UploadPage() {
     setUploadProgress(0);
 
     try {
+      setUploadError(null);
       // uploadVideo trả về string (job_id trực tiếp)
       const jobId = await uploadVideo(file, processMode, "segment", (pct) => {
         setUploadProgress(pct);
@@ -106,9 +112,16 @@ export function UploadPage() {
       setProcessingMsg(isVi ? "Đã tạo phụ đề!" : "Subtitles generated!");
       setState("done");
 
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setState("error");
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("LIMIT_REACHED")) {
+        setUploadError(isVi ? "Đã đạt giới hạn 5 video/tháng. Nâng cấp Premium để tiếp tục." : "Monthly limit of 5 videos reached. Upgrade to Premium to continue.");
+      } else if (msg.includes("PREMIUM_REQUIRED")) {
+        setUploadError(isVi ? "Chế độ Realtime yêu cầu tài khoản Premium." : "Realtime mode requires a Premium account.");
+      } else {
+        setState("error");
+      }
     }
   }, [isVi, navigate, processMode]);
 
@@ -571,46 +584,81 @@ export function UploadPage() {
                 {isVi ? "Chế độ phụ đề" : "Subtitle Mode"}
               </h3>
               <div className="space-y-2">
+                {/* Usage counter for free users */}
+                {!isPremium && (
+                  <div className="flex items-center justify-between px-1 mb-1">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {isVi ? "Video đã dùng tháng này:" : "Videos used this month:"}
+                    </span>
+                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                      {profile?.videos_used_this_month ?? 0}/5
+                    </span>
+                  </div>
+                )}
+
+                {/* Upload error */}
+                {uploadError && (
+                  <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-600 text-xs mb-1">
+                    <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <span>{uploadError}</span>
+                    {uploadError.includes("limit") || uploadError.includes("giới hạn") ? (
+                      <Link to="/upgrade" className="ml-auto shrink-0 font-semibold underline">{isVi ? "Nâng cấp" : "Upgrade"}</Link>
+                    ) : null}
+                  </div>
+                )}
+
                 {[
                   {
                     id: "normal",
                     label: isVi ? "Thường" : "Normal",
                     desc: isVi ? "Chờ xử lý xong mới vào Editor" : "Enter Editor after processing completes",
                     badge: isVi ? "Mặc định" : "Default",
+                    locked: false,
                   },
                   {
                     id: "realtime",
                     label: "Realtime",
                     desc: isVi ? "Vào Editor ngay, không cần đợi" : "Enter Editor immediately, no waiting",
-                    badge: "Beta",
+                    badge: isPremium ? "Beta" : "Premium",
+                    locked: !isPremium,
                   },
                 ].map((mode) => (
                   <label
                     key={mode.id}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors ${
-                      processMode === mode.id
-                        ? "border-violet-300 bg-violet-50 dark:bg-violet-900/30 dark:border-violet-700"
-                        : "border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors ${
+                      mode.locked
+                        ? "opacity-60 cursor-not-allowed border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+                        : processMode === mode.id
+                        ? "border-violet-300 bg-violet-50 dark:bg-violet-900/30 dark:border-violet-700 cursor-pointer"
+                        : "border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                     }`}
                   >
-                    <input
-                      type="radio"
-                      name="subtitle-mode"
-                      value={mode.id}
-                      checked={processMode === mode.id}
-                      onChange={() => setProcessMode(mode.id as ProcessMode)}
-                      className="accent-violet-600"
-                    />
+                    {mode.locked ? (
+                      <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    ) : (
+                      <input
+                        type="radio"
+                        name="subtitle-mode"
+                        value={mode.id}
+                        checked={processMode === mode.id}
+                        onChange={() => setProcessMode(mode.id as ProcessMode)}
+                        className="accent-violet-600"
+                      />
+                    )}
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-700 dark:text-gray-100">{mode.label}</span>
                         {mode.badge && (
                           <span
-                            className={`text-xs px-1.5 py-0.5 rounded-md ${mode.id === "realtime"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-green-100 text-green-700"
-                              }`}
+                            className={`text-xs px-1.5 py-0.5 rounded-md flex items-center gap-1 ${
+                              mode.locked
+                                ? "bg-amber-100 text-amber-700"
+                                : mode.id === "realtime"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-green-100 text-green-700"
+                            }`}
                           >
+                            {mode.locked && <Crown className="w-2.5 h-2.5" />}
                             {mode.badge}
                           </span>
                         )}

@@ -60,10 +60,11 @@ _job_event_queues: dict[str, queue.Queue] = {}
 _job_event_lock = threading.Lock()
 
 
-def create_job(filename: str, translation_mode: str, video_path: str) -> dict:
+def create_job(filename: str, translation_mode: str, video_path: str, user_id: str | None = None) -> dict:
     """Create a new job record and persist it."""
     job = {
         "job_id":           str(uuid.uuid4()),
+        "user_id":          user_id,
         "filename":         filename,
         "status":           JobStatus.QUEUED,
         "progress":         0,
@@ -299,17 +300,49 @@ def detect_speech_segments(audio_path: str) -> tuple[list[dict], torch.Tensor]:
     return segments, wav
 
 
-def merge_short_segments(segments: list[dict], min_duration: float = 2.0) -> list[dict]:
-    """Merge adjacent short segments so each is ≥ min_duration seconds."""
+def merge_short_segments(segments: list[dict], min_duration: float = 2.0, max_duration: float = 0.0) -> list[dict]:
+    """Merge adjacent short segments so each is ≥ min_duration seconds.
+    If max_duration > 0, flush the buffer before it would exceed max_duration.
+    """
     merged, buffer = [], None
     for seg in segments:
-        buffer = seg.copy() if buffer is None else {**buffer, "end": seg["end"]}
+        if buffer is None:
+            buffer = seg.copy()
+        else:
+            if max_duration > 0 and (seg["end"] - buffer["start"]) > max_duration:
+                merged.append(buffer)
+                buffer = seg.copy()
+            else:
+                buffer = {**buffer, "end": seg["end"]}
         if buffer["end"] - buffer["start"] >= min_duration:
             merged.append(buffer)
             buffer = None
     if buffer:
         merged.append(buffer)
     return merged
+
+
+def split_long_segment(seg: dict, max_duration: float = 25.0) -> list[dict]:
+    """Split a segment longer than max_duration into equal-duration chunks."""
+    duration = seg["end"] - seg["start"]
+    if duration <= max_duration:
+        return [seg]
+    n_chunks = int(duration / max_duration) + 1
+    chunk_dur = duration / n_chunks
+    result = []
+    for i in range(n_chunks):
+        chunk_start = round(seg["start"] + i * chunk_dur, 2)
+        chunk_end = round(seg["start"] + (i + 1) * chunk_dur, 2)
+        if i == n_chunks - 1:
+            chunk_end = seg["end"]
+        result.append({"start": chunk_start, "end": chunk_end})
+    return result
+
+
+def _cleanup_job_queue(job_id: str) -> None:
+    """Remove the event queue for a completed/failed job to free memory."""
+    with _job_event_lock:
+        _job_event_queues.pop(job_id, None)
 
 
 def encode_segments_for_colab(
@@ -459,7 +492,10 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         segments, wav = detect_speech_segments(audio_path)
         if not segments:
             raise RuntimeError("No speech detected in the video.")
-        segments = merge_short_segments(segments, min_duration=2.0)
+        split_segs: list[dict] = []
+        for s in segments:
+            split_segs.extend(split_long_segment(s, max_duration=25.0))
+        segments = merge_short_segments(split_segs, min_duration=2.0, max_duration=25.0)
 
         # ── Step 3: Encode + send to Colab ─────────────────────────
         update_job(job_id, status=JobStatus.TRANSCRIBING, progress=40)
@@ -503,6 +539,7 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         # Clean up temp audio
         if os.path.exists(audio_path):
             os.remove(audio_path)
+        _cleanup_job_queue(job_id)
 
 
 def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
@@ -525,7 +562,10 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
         segments, wav = detect_speech_segments(audio_path)
         if not segments:
             raise RuntimeError("No speech detected in the video.")
-        segments = merge_short_segments(segments, min_duration=2.0)
+        split_segs_rt: list[dict] = []
+        for s in segments:
+            split_segs_rt.extend(split_long_segment(s, max_duration=25.0))
+        segments = merge_short_segments(split_segs_rt, min_duration=1.5, max_duration=25.0)
 
         update_job(job_id, status=JobStatus.TRANSCRIBING, progress=40)
         segments_data = encode_segments_for_colab(segments, wav)
@@ -558,7 +598,7 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
             if event.get("vietnamese_text"):
                 vietnamese_text_parts.append(str(event.get("vietnamese_text", "")))
 
-            progress = 40 + int(((idx + 1) / total) * 45)
+            progress = 30 + int(((idx + 1) / total) * 60)
             update_job(
                 job_id,
                 status=JobStatus.TRANSCRIBING,
@@ -612,3 +652,4 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
     finally:
         if os.path.exists(audio_path):
             os.remove(audio_path)
+        _cleanup_job_queue(job_id)

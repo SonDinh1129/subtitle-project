@@ -8,7 +8,30 @@
  * Prod : VITE_API_URL=/api                       (Flask serve React)
  */
 
+import { supabase } from "./supabase";
+
 const BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:5000/api").replace(/\/$/, "");
+
+/** Returns "Bearer <token>" or null if no active session. */
+export async function getAuthHeader(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return null;
+  return `Bearer ${session.access_token}`;
+}
+
+/** Authenticated fetch for JSON endpoints. Throws if not authenticated. */
+export async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getAuthHeader();
+  if (!token) throw new Error("Not authenticated");
+  return fetch(`${BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers as Record<string, string> | undefined),
+      Authorization: token,
+    },
+  });
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,12 +127,14 @@ export const STATUS_MESSAGES: Record<JobStatus, string> = {
  * Upload video file, nhận job_id để poll.
  * onProgress: 0–100 (XHR upload progress)
  */
-export function uploadVideo(
+export async function uploadVideo(
   file: File,
   processMode: ProcessMode = "normal",
   translationMode: "segment" | "sentence" = "segment",
   onProgress?: (pct: number) => void,
 ): Promise<string> {
+  const authToken = await getAuthHeader();
+
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append("file", file);
@@ -129,18 +154,24 @@ export function uploadVideo(
     });
     xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
     xhr.open("POST", `${BASE}/upload`);
+    if (authToken) xhr.setRequestHeader("Authorization", authToken);
     xhr.send(form);
   });
 }
 
-export function openRealtimeStream(
+export async function openRealtimeStream(
   jobId: string,
   handlers: {
     onEvent: (evt: RealtimeStreamEvent) => void;
     onError?: (err: Event) => void;
   },
-): EventSource {
-  const stream = new EventSource(`${BASE}/jobs/${jobId}/stream`);
+): Promise<EventSource> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? "";
+  const url = token
+    ? `${BASE}/jobs/${jobId}/stream?token=${encodeURIComponent(token)}`
+    : `${BASE}/jobs/${jobId}/stream`;
+  const stream = new EventSource(url);
 
   stream.onmessage = (event) => {
     try {
@@ -170,7 +201,7 @@ export function openRealtimeStream(
  * Lấy trạng thái + kết quả của job.
  */
 export async function getJobStatus(jobId: string): Promise<JobResponse> {
-  const res = await fetch(`${BASE}/jobs/${jobId}`);
+  const res = await authFetch(`/jobs/${jobId}`);
   if (!res.ok) throw new Error(`Status check failed (${res.status})`);
   return res.json();
 }
@@ -216,9 +247,8 @@ export async function exportVideo(
   resolution: ExportResolution,
   lang: SubtitleLang,
 ): Promise<ExportResponse> {
-  const res = await fetch(`${BASE}/export`, {
+  const res = await authFetch(`/export`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ job_id: jobId, resolution, lang }),
   });
   if (!res.ok) {

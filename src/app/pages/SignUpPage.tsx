@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import { motion } from "motion/react";
 import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2 } from "lucide-react";
 import { AuthRightPanel } from "../components/AuthRightPanel";
 import { useUiPreferences } from "../context/UiPreferencesContext";
+import { supabase } from "../../lib/supabase";
 
 function GoogleIcon() {
   return (
@@ -66,7 +67,6 @@ function PasswordStrength({ password, isVi }: { password: string; isVi: boolean 
 }
 
 export function SignUpPage() {
-  const navigate = useNavigate();
   const { language } = useUiPreferences();
   const isVi = language === "vi";
   const [showPassword, setShowPassword] = useState(false);
@@ -75,6 +75,8 @@ export function SignUpPage() {
   const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [signUpSuccess, setSignUpSuccess] = useState(false);
   const [errors, setErrors] = useState<{
     fullName?: string;
     email?: string;
@@ -93,6 +95,11 @@ export function SignUpPage() {
     return e;
   };
 
+  const handleOAuth = async (provider: "google" | "github") => {
+    const redirectTo = `${window.location.origin}/upload`;
+    await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors = validate();
@@ -101,11 +108,50 @@ export function SignUpPage() {
       return;
     }
     setErrors({});
+    setAuthError(null);
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    setIsLoading(false);
-    navigate("/upload");
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName } },
+      });
+      if (error) {
+        setAuthError(error.message);
+      } else if (data.user && data.user.identities && data.user.identities.length === 0) {
+        setAuthError(isVi ? "Email này đã được đăng ký. Vui lòng đăng nhập." : "This email is already registered. Please sign in.");
+      } else {
+        setSignUpSuccess(true);
+      }
+    } catch {
+      setAuthError(isVi ? "Đã xảy ra lỗi, vui lòng thử lại" : "An error occurred, please try again");
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  if (signUpSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+        <div className="max-w-md w-full mx-4 text-center px-6">
+          <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">
+            {isVi ? "Kiểm tra email của bạn!" : "Check your email!"}
+          </h2>
+          <p className="text-gray-500 mb-6" style={{ fontSize: "0.9375rem" }}>
+            {isVi
+              ? `Chúng tôi đã gửi link xác nhận đến ${email}. Vui lòng kiểm tra và nhấp vào link để hoàn tất đăng ký.`
+              : `We sent a confirmation link to ${email}. Please check your inbox and click the link to complete registration.`}
+          </p>
+          <Link to="/signin" className="text-violet-600 hover:text-violet-700 font-semibold">
+            {isVi ? "Quay lại đăng nhập" : "Back to Sign In"}
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const perks = isVi
     ? [
@@ -158,6 +204,13 @@ export function SignUpPage() {
             </div>
           </motion.div>
 
+          {/* Auth error */}
+          {authError && (
+            <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
+              {authError}
+            </div>
+          )}
+
           {/* Social Buttons */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -167,6 +220,7 @@ export function SignUpPage() {
           >
             <button
               type="button"
+              onClick={() => handleOAuth("google")}
               className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
               style={{ fontSize: "0.9375rem", fontWeight: 500 }}
             >
@@ -175,6 +229,7 @@ export function SignUpPage() {
             </button>
             <button
               type="button"
+              onClick={() => handleOAuth("github")}
               className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
               style={{ fontSize: "0.9375rem", fontWeight: 500 }}
             >

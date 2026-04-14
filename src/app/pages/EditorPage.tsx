@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
+import { Navigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   wordsToSubtitles,
@@ -286,6 +287,7 @@ export function EditorPage() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<Subtitle[][]>([]);
   const [redoStack, setRedoStack] = useState<Subtitle[][]>([]);
+  const [noJobData, setNoJobData] = useState(false);
   const [subtitleAnchor, setSubtitleAnchor] = useState({ x: 50, y: 60 });
   const [isDraggingSubtitle, setIsDraggingSubtitle] = useState(false);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -352,7 +354,10 @@ export function EditorPage() {
 
     // Đọc subtitle từ job thật
     const raw = sessionStorage.getItem("currentJob");
-    if (!raw) return;
+    if (!raw) {
+      setNoJobData(true);
+      return;
+    }
 
     try {
       const job = JSON.parse(raw);
@@ -741,6 +746,8 @@ export function EditorPage() {
   const safeDuration = totalDuration > 0 ? totalDuration : 1;
   const timelineProgress = (currentTime / safeDuration) * 100;
   const canExport = !isRealtimeMode || streamStatus === "done";
+
+  if (noJobData) return <Navigate to="/upload" replace />;
 
   return (
     <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">

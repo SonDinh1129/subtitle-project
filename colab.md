@@ -475,9 +475,10 @@ def transcribe_translate_stream():
                 del audio, segments_gen
                 gc.collect()
 
-                # Bỏ qua đoạn im lặng / không có lời
+                # Bỏ qua đoạn im lặng / không có lời — yield skipped event để frontend track progress
                 if not segment_words:
                     logger.info(f"  Segment {idx}: no speech, skipping")
+                    yield f"data: {json.dumps({'index': idx, 'total': total, 'skipped': True})}\n\n"
                     continue
 
                 # ── BƯỚC 2: MT (copy y chang từ /transcribe_translate) ──
