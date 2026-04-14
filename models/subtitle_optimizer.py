@@ -450,12 +450,18 @@ def fix_cps(blocks: list[SubtitleBlock]) -> tuple[list[SubtitleBlock], bool]:
         # Strategy B: split block by character ratio
         splits = _split_block_by_chars(block)
 
-        # Dead-lock guard: split creates blocks < MIN_DURATION → accept violation
-        if len(splits) == 1 or any(s.duration < MIN_DURATION for s in splits):
+        # Dead-lock guard: accept CPS violation if split is impossible or unhelpful
+        if len(splits) == 1:
             result.append(block)
             logger.warning(
-                "Block %d: CPS=%.1f — cannot fix without creating blocks < %.1fs, "
-                "accepting violation", block.index, block.cps, MIN_DURATION,
+                "Block %d: CPS=%.1f — text too short to split, accepting violation",
+                block.index, block.cps,
+            )
+        elif any(s.duration < MIN_DURATION for s in splits):
+            result.append(block)
+            logger.warning(
+                "Block %d: CPS=%.1f — split creates blocks < %.1fs, accepting violation",
+                block.index, block.cps, MIN_DURATION,
             )
         else:
             result.extend(splits)
