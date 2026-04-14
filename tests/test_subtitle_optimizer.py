@@ -532,3 +532,75 @@ class TestFixGap:
     def test_empty_list(self):
         result = fix_gap([])
         assert result == []
+
+
+from models.subtitle_optimizer import optimize_subtitles
+
+
+class TestOptimizeSubtitles:
+    def test_already_compliant(self):
+        blocks = [
+            SubtitleBlock(1, 0.0, 3.0, "Good block"),
+            SubtitleBlock(2, 4.0, 7.0, "Also good"),
+        ]
+        result = optimize_subtitles(blocks)
+        assert len(result) == 2
+        assert result[0].index == 1
+        assert result[1].index == 2
+
+    def test_reindexes(self):
+        blocks = [
+            SubtitleBlock(99, 0.0, 10.0, "Long text that needs splitting. Second part here"),
+        ]
+        result = optimize_subtitles(blocks)
+        for i, b in enumerate(result, 1):
+            assert b.index == i
+
+    def test_empty_input(self):
+        result = optimize_subtitles([])
+        assert result == []
+
+    def test_all_violations_fixed(self):
+        """Integration test: block with multiple violations."""
+        blocks = [
+            SubtitleBlock(1, 0.0, 15.0,
+                "Đây là một câu rất dài bằng tiếng Việt cần được chia nhỏ. "
+                "Phần thứ hai của câu cũng khá dài và cần xử lý thêm nữa"),
+            SubtitleBlock(2, 15.0, 18.0, "Block tiếp theo"),
+        ]
+        result = optimize_subtitles(blocks)
+
+        for b in result:
+            assert b.duration <= MAX_DURATION + 0.01
+            assert b.duration >= MIN_DURATION - 0.01 or b.cps > MAX_CPS  # deadlock exception
+            assert len(b.lines) <= MAX_LINES
+            assert b.longest_line <= MAX_CPL_VI or len(b.text.split()) == 1  # single word exception
+
+        # Check gaps
+        for i in range(len(result) - 1):
+            gap = result[i + 1].start - result[i].end
+            assert gap >= MIN_GAP - 0.001
+
+    def test_convergence_within_3_iterations(self):
+        text = "A " * 60  # 120 chars
+        blocks = [SubtitleBlock(1, 0.0, 14.0, text.strip())]
+        result = optimize_subtitles(blocks)
+        for b in result:
+            assert b.duration <= MAX_DURATION + 0.01
+
+    def test_roundtrip_with_srt(self):
+        """Full integration: parse SRT → optimize → write SRT → parse again."""
+        srt_input = (
+            "1\n00:00:00,000 --> 00:00:15,000\n"
+            "Đây là subtitle dài cần optimize vì nó quá dài cho một block duy nhất "
+            "và cần phải được chia thành nhiều phần nhỏ hơn\n\n"
+            "2\n00:00:15,100 --> 00:00:18,000\nBlock bình thường\n\n"
+        )
+        blocks = parse_srt(srt_input)
+        optimized = optimize_subtitles(blocks)
+        srt_output = write_srt(optimized)
+        reparsed = parse_srt(srt_output)
+
+        assert len(reparsed) == len(optimized)
+        for b in reparsed:
+            assert b.duration <= MAX_DURATION + 0.01

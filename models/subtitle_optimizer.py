@@ -524,3 +524,35 @@ def fix_gap(blocks: list[SubtitleBlock]) -> list[SubtitleBlock]:
             result[-1] = merged_block
 
     return result
+
+
+# ─────────────────────────────────────────────────────────────────
+# MAIN PIPELINE
+# ─────────────────────────────────────────────────────────────────
+
+def optimize_subtitles(blocks: list[SubtitleBlock]) -> list[SubtitleBlock]:
+    """Main entry — run pipeline loop until convergence or max 3 iterations."""
+    if not blocks:
+        return []
+
+    for _ in range(3):
+        blocks, d_changed = fix_duration(blocks)
+        blocks, c_changed = fix_cpl(blocks, max_cpl=MAX_CPL_VI)
+        blocks, s_changed = fix_cps(blocks)
+        blocks = fix_gap(blocks)  # always runs — no convergence check needed
+        if not (d_changed or c_changed or s_changed):
+            break
+
+    # Re-index
+    for i, block in enumerate(blocks, 1):
+        block.index = i
+
+    # Log remaining violations
+    for block in blocks:
+        if block.cps > MAX_CPS:
+            logger.warning(
+                "Block %d: CPS=%.1f > %.1f — could not fix",
+                block.index, block.cps, MAX_CPS,
+            )
+
+    return blocks
