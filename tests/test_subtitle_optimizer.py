@@ -464,3 +464,71 @@ class TestFixCps:
         result, changed = fix_cps(blocks)
         assert changed
         assert len(result) >= 2
+
+
+from models.subtitle_optimizer import fix_gap
+
+
+class TestFixGap:
+    def test_single_block(self):
+        blocks = [SubtitleBlock(1, 0.0, 3.0, "Only one")]
+        result = fix_gap(blocks)
+        assert len(result) == 1
+
+    def test_no_changes_sufficient_gap(self):
+        blocks = [
+            SubtitleBlock(1, 0.0, 3.0, "First"),
+            SubtitleBlock(2, 4.0, 7.0, "Second"),
+        ]
+        result = fix_gap(blocks)
+        assert len(result) == 2
+        assert result[0].end == 3.0  # unchanged
+
+    def test_shrinks_prev_end(self):
+        blocks = [
+            SubtitleBlock(1, 0.0, 3.95, "First block text"),
+            SubtitleBlock(2, 4.0, 7.0, "Second"),
+        ]
+        # gap = 4.0 - 3.95 = 0.05 < 0.083 → shrink prev.end
+        result = fix_gap(blocks)
+        assert len(result) == 2
+        gap = result[1].start - result[0].end
+        assert gap >= MIN_GAP - 0.001  # float tolerance
+
+    def test_merges_when_shrink_too_much(self):
+        blocks = [
+            SubtitleBlock(1, 3.0, 3.95, "Hi"),     # duration=0.95, already near MIN_DURATION
+            SubtitleBlock(2, 4.0, 7.0, "Second"),   # gap=0.05 < MIN_GAP
+        ]
+        # shrink prev.end to 4.0-0.083=3.917 → new duration=0.917 < MIN_DURATION → merge
+        result = fix_gap(blocks)
+        assert len(result) == 1
+        assert result[0].start == 3.0
+        assert result[0].end == 7.0
+
+    def test_overlap_handled(self):
+        blocks = [
+            SubtitleBlock(1, 0.0, 5.0, "First block"),
+            SubtitleBlock(2, 4.0, 7.0, "Overlapping"),
+        ]
+        # gap = 4.0 - 5.0 = -1.0 → overlap
+        result = fix_gap(blocks)
+        # Should either shrink or merge — no overlap in result
+        for i in range(len(result) - 1):
+            assert result[i + 1].start - result[i].end >= MIN_GAP - 0.001
+
+    def test_merged_text_gets_cpl_fix(self):
+        long_text = "A " * 30  # 60 chars → needs wrapping after merge
+        blocks = [
+            SubtitleBlock(1, 3.0, 3.95, long_text.strip()),
+            SubtitleBlock(2, 4.0, 7.0, "Second part here"),
+        ]
+        result = fix_gap(blocks)
+        assert len(result) == 1
+        # Merged block should have been wrapped
+        for line in result[0].lines:
+            assert len(line) <= MAX_CPL_VI
+
+    def test_empty_list(self):
+        result = fix_gap([])
+        assert result == []

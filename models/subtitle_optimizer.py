@@ -462,3 +462,59 @@ def fix_cps(blocks: list[SubtitleBlock]) -> tuple[list[SubtitleBlock], bool]:
             changed = True
 
     return result, changed
+
+
+# ─────────────────────────────────────────────────────────────────
+# PIPELINE STEP 4: fix_gap
+# ─────────────────────────────────────────────────────────────────
+
+def fix_gap(blocks: list[SubtitleBlock]) -> list[SubtitleBlock]:
+    """Ensure gap between consecutive blocks >= MIN_GAP (83ms).
+
+    No changed flag — always runs, does not contribute to convergence
+    check. Gap fix may increase CPS of prev block (shortens duration).
+    Accepted trade-off: gap correctness > CPS in single pass.
+    fix_cps catches it in next iteration.
+
+    Strategy:
+    - gap < MIN_GAP: shrink prev.end
+    - shrink would create prev < MIN_DURATION: merge blocks
+    """
+    if len(blocks) <= 1:
+        return list(blocks)
+
+    result = [blocks[0]]
+
+    for i in range(1, len(blocks)):
+        prev = result[-1]
+        curr = blocks[i]
+        gap = curr.start - prev.end
+
+        if gap < 0:
+            logger.warning("Block %d -> %d: overlap %.3fs", i - 1, i, abs(gap))
+
+        if gap >= MIN_GAP:
+            result.append(curr)
+            continue
+
+        new_prev_end = curr.start - MIN_GAP
+
+        if new_prev_end - prev.start >= MIN_DURATION:
+            result[-1] = replace(prev, end=round(new_prev_end, 3))
+            result.append(curr)
+        else:
+            # Merge — curr absorbed into prev
+            merged_text = ' '.join([
+                prev.text.replace('\n', ' '),
+                curr.text.replace('\n', ' '),
+            ])
+            merged_block = SubtitleBlock(0, prev.start, curr.end, merged_text)
+
+            # Inline CPL fix — defensive, avoids edge case on last iteration
+            lines = wrap_text(merged_block.text, MAX_CPL_VI)
+            if len(lines) <= MAX_LINES:
+                merged_block = replace(merged_block, text='\n'.join(lines))
+
+            result[-1] = merged_block
+
+    return result
