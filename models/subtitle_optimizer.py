@@ -377,3 +377,88 @@ def _split_block_by_text(
         blocks_out[-1] = replace(blocks_out[-1], end=block.end)
 
     return blocks_out
+
+
+# ─────────────────────────────────────────────────────────────────
+# PIPELINE STEP 3: fix_cps
+# ─────────────────────────────────────────────────────────────────
+
+def _split_block_by_chars(block: SubtitleBlock) -> list[SubtitleBlock]:
+    """Split block into two parts by character ratio, preserving original timing.
+
+    Used by fix_cps when the block can't be extended and must be divided.
+    Unlike split_block (which splits by MAX_DURATION), this always splits
+    regardless of duration, allocating time proportional to character count.
+    """
+    text = block.text.replace('\n', ' ')
+    if len(text) < 2:
+        return [block]
+
+    mid = len(text) // 2
+    split_pos = find_best_split(text, mid)
+
+    part1_text = text[:split_pos].strip()
+    part2_text = text[split_pos:].strip()
+
+    if not part1_text:
+        return [replace(block, text=part2_text)]
+    if not part2_text:
+        return [replace(block, text=part1_text)]
+
+    total_chars = len(part1_text) + len(part2_text)
+    ratio = len(part1_text) / total_chars if total_chars > 0 else 0.5
+    split_time = round(block.start + block.duration * ratio, 3)
+
+    part1 = SubtitleBlock(0, block.start, split_time, part1_text)
+    part2 = SubtitleBlock(0, split_time, block.end, part2_text)
+
+    return [part1, part2]
+
+
+def fix_cps(blocks: list[SubtitleBlock]) -> tuple[list[SubtitleBlock], bool]:
+    """Ensure each block has CPS <= MAX_CPS.
+
+    Strategy:
+    1. Extend duration (if gap available after block)
+    2. Fallback: split block by character ratio
+    Dead-lock: if split creates blocks < MIN_DURATION, accept violation.
+    """
+    result: list[SubtitleBlock] = []
+    changed = False
+
+    for i, block in enumerate(blocks):
+        if block.cps <= MAX_CPS:
+            result.append(block)
+            continue
+
+        char_count = len(block.text.replace('\n', ''))
+        needed_duration = char_count / MAX_CPS
+
+        # Strategy A: extend end time
+        # float('inf') for last block — can extend freely, limited only by MAX_DURATION
+        next_start = blocks[i + 1].start if i + 1 < len(blocks) else float('inf')
+        max_end = next_start - MIN_GAP
+        target_end = block.start + needed_duration
+
+        # Note: we check blocks[i+1].start (original list), not result[-1].end.
+        # Safe because extend only affects forward direction.
+        if target_end <= max_end and needed_duration <= MAX_DURATION:
+            result.append(replace(block, end=round(target_end, 3)))
+            changed = True
+            continue
+
+        # Strategy B: split block by character ratio
+        splits = _split_block_by_chars(block)
+
+        # Dead-lock guard: split creates blocks < MIN_DURATION → accept violation
+        if len(splits) == 1 or any(s.duration < MIN_DURATION for s in splits):
+            result.append(block)
+            logger.warning(
+                "Block %d: CPS=%.1f — cannot fix without creating blocks < %.1fs, "
+                "accepting violation", block.index, block.cps, MIN_DURATION,
+            )
+        else:
+            result.extend(splits)
+            changed = True
+
+    return result, changed

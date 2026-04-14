@@ -398,3 +398,69 @@ class TestFixCpl:
         blocks = [SubtitleBlock(1, 0.0, 3.0, "Short text")]
         _, changed = fix_cpl(blocks)
         assert not changed
+
+
+from models.subtitle_optimizer import fix_cps, MAX_CPS
+
+
+class TestFixCps:
+    def test_no_changes_under_limit(self):
+        # 10 chars / 5s = 2.0 CPS — well under 17
+        blocks = [SubtitleBlock(1, 0.0, 5.0, "Short text")]
+        result, changed = fix_cps(blocks)
+        assert not changed
+
+    def test_extend_when_room(self):
+        # 50 chars / 2s = 25 CPS → needs 50/17 ≈ 2.94s
+        text = "A" * 50
+        blocks = [
+            SubtitleBlock(1, 0.0, 2.0, text),
+            SubtitleBlock(2, 10.0, 13.0, "Next"),
+        ]
+        result, changed = fix_cps(blocks)
+        assert changed
+        assert result[0].cps <= MAX_CPS + 0.1  # small float tolerance
+        assert result[0].start == 0.0  # start unchanged
+
+    def test_extend_respects_gap(self):
+        # 50 chars / 2s = 25 CPS, but next block starts at 3.0
+        # needed_duration = 50/17 = 2.94, target_end = 2.94
+        # max_end = 3.0 - 0.083 = 2.917 < 2.94 → can't extend enough → split
+        text = "A" * 50
+        blocks = [
+            SubtitleBlock(1, 0.0, 2.0, text),
+            SubtitleBlock(2, 3.0, 6.0, "Next"),
+        ]
+        result, changed = fix_cps(blocks)
+        assert changed
+        assert len(result) >= 3  # block 1 split + block 2
+
+    def test_extend_last_block_freely(self):
+        # Last block, no next → can extend up to MAX_DURATION
+        text = "A" * 50
+        blocks = [SubtitleBlock(1, 0.0, 2.0, text)]
+        result, changed = fix_cps(blocks)
+        assert changed
+        assert result[0].cps <= MAX_CPS + 0.1
+
+    def test_deadlock_accepts_violation(self):
+        # 30 chars / 1.2s = 25 CPS → needs 1.76s
+        # Can't extend (next too close), split would create < 1s blocks
+        text = "A" * 30
+        blocks = [
+            SubtitleBlock(1, 0.0, 1.2, text),
+            SubtitleBlock(2, 1.3, 4.0, "Next"),
+        ]
+        result, changed = fix_cps(blocks)
+        # Should keep original — CPS violation accepted, no changes made
+        assert not changed
+        assert result[0].text == text
+        assert result[0].duration == 1.2
+
+    def test_extend_capped_by_max_duration(self):
+        # 200 chars / 5s = 40 CPS → needs 200/17 ≈ 11.76s → exceeds MAX_DURATION → split
+        text = "A" * 200
+        blocks = [SubtitleBlock(1, 0.0, 5.0, text)]
+        result, changed = fix_cps(blocks)
+        assert changed
+        assert len(result) >= 2
