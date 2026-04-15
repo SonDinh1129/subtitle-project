@@ -55,7 +55,19 @@ mt_model = AutoModelForSeq2SeqLM.from_pretrained(
 )
 mt_device = torch.device("cuda")
 mt_model.to(mt_device)
-logger.info("✅ MT model loaded!")
+logger.info("✅ MT EN→VI model loaded!")
+
+# Load MT Model (VI → EN)
+logger.info("🔄 Loading VinAI Translate VI→EN...")
+mt_vi2en_tokenizer = AutoTokenizer.from_pretrained(
+    "vinai/vinai-translate-vi2en-v2",
+    src_lang="vi_VN"
+)
+mt_vi2en_model = AutoModelForSeq2SeqLM.from_pretrained(
+    "vinai/vinai-translate-vi2en-v2"
+)
+mt_vi2en_model.to(mt_device)
+logger.info("✅ MT VI→EN model loaded!")
 
 # ============================================
 # CELL 4: Helper Functions
@@ -69,8 +81,8 @@ def is_valid_word(word):
     if not word or len(word) < 1:
         return False
 
-    # English word pattern
-    return re.match(r"^[A-Za-z0-9][A-Za-z0-9''\-.,!?]*$", word) is not None
+    # Allow Unicode letters (Vietnamese diacritics) and Latin characters
+    return re.match(r"^[\w][\w''\-.,!?]*$", word, re.UNICODE) is not None
 
 
 def add_punctuation_simple(text):
@@ -130,6 +142,45 @@ def translate_en2vi_batch(en_texts):
     )
 
     return vi_texts
+
+
+def translate_vi2en_batch(vi_texts):
+    """
+    Translate Vietnamese to English in batch
+
+    Args:
+        vi_texts: List of Vietnamese texts
+
+    Returns:
+        List of English translations
+    """
+    if not vi_texts:
+        return []
+
+    input_ids = mt_vi2en_tokenizer(
+        vi_texts,
+        padding=True,
+        truncation=True,
+        max_length=512,
+        return_tensors="pt"
+    ).to(mt_device)
+
+    with torch.no_grad():
+        output_ids = mt_vi2en_model.generate(
+            **input_ids,
+            decoder_start_token_id=mt_vi2en_tokenizer.lang_code_to_id["en_XX"],
+            num_return_sequences=1,
+            num_beams=5,
+            max_length=512,
+            early_stopping=True
+        )
+
+    en_texts = mt_vi2en_tokenizer.batch_decode(
+        output_ids,
+        skip_special_tokens=True
+    )
+
+    return en_texts
 
 
 def align_translation_to_words(
@@ -203,7 +254,8 @@ def health():
     return jsonify({
         "status": "healthy",
         "asr_model": "whisper-large-v3",
-        "mt_model": "vinai-translate-en2vi-v2",
+        "mt_en2vi_model": "vinai-translate-en2vi-v2",
+        "mt_vi2en_model": "vinai-translate-vi2en-v2",
         "device": "cuda"
     })
 
@@ -315,11 +367,12 @@ def transcribe_translate():
         data = request.get_json()
         segments = data.get("segments", [])
         translation_mode = data.get("translation_mode", "segment")
+        source_lang = data.get("source_lang", "en")  # "en" | "vi"
 
-        logger.info(f"📦 Processing {len(segments)} segments...")
+        logger.info(f"📦 Processing {len(segments)} segments (source_lang={source_lang})...")
 
-        # Step 1: ASR (English transcription)
-        all_english_words = []
+        # Step 1: ASR
+        all_source_words = []
         segment_texts = []
 
         for idx, seg in enumerate(segments):
@@ -329,7 +382,7 @@ def transcribe_translate():
             segments_gen, _ = asr_model.transcribe(
                 audio,
                 task="transcribe",
-                language="en",
+                language=source_lang,
                 word_timestamps=True,
                 beam_size=5,
                 vad_filter=False
@@ -346,10 +399,9 @@ def transcribe_translate():
                                 "end": round(seg["start_offset"] + w.end, 2),
                                 "segment_id": idx
                             }
-                            all_english_words.append(word_data)
+                            all_source_words.append(word_data)
                             segment_words.append(word_data)
 
-            # Group by segment
             segment_text = " ".join([w["word"] for w in segment_words])
             if segment_text:
                 segment_text = add_punctuation_simple(segment_text)
@@ -361,51 +413,65 @@ def transcribe_translate():
             del audio, segments_gen
             gc.collect()
 
-        logger.info(f"✅ ASR done: {len(all_english_words)} words")
+        logger.info(f"✅ ASR done: {len(all_source_words)} words")
 
-        # Step 2: Translation (EN → VI)
-        all_vietnamese_words = []
-        vietnamese_full_text = []
+        # Step 2: Translation
+        all_translated_words = []
+        translated_full_text = []
+
+        if source_lang == "vi":
+            translate_fn = translate_vi2en_batch
+        else:
+            translate_fn = translate_en2vi_batch
 
         if translation_mode == "segment":
-            # Translate each segment separately (better timestamp alignment)
             for seg_data in segment_texts:
-                vi_translation = translate_en2vi_batch([seg_data["text"]])[0]
-                vietnamese_full_text.append(vi_translation)
+                translation = translate_fn([seg_data["text"]])[0]
+                translated_full_text.append(translation)
 
-                # Align timestamps
-                vi_words = align_translation_to_words(
+                translated_words = align_translation_to_words(
                     seg_data["words"],
                     seg_data["text"],
-                    vi_translation
+                    translation
                 )
-                all_vietnamese_words.extend(vi_words)
+                all_translated_words.extend(translated_words)
 
         else:  # "sentence" mode
-            # Translate all at once (better translation quality)
-            full_english = " ".join([s["text"] for s in segment_texts])
-            vi_translation = translate_en2vi_batch([full_english])[0]
-            vietnamese_full_text = [vi_translation]
+            full_source_text = " ".join([s["text"] for s in segment_texts])
+            translation = translate_fn([full_source_text])[0]
+            translated_full_text = [translation]
 
-            # Align timestamps (approximate)
-            all_vietnamese_words = align_translation_to_words(
-                all_english_words,
-                full_english,
-                vi_translation
+            all_translated_words = align_translation_to_words(
+                all_source_words,
+                full_source_text,
+                translation
             )
 
-        logger.info(f"✅ MT done: {len(all_vietnamese_words)} words")
+        logger.info(f"✅ MT done: {len(all_translated_words)} words")
 
         total_time = time.time() - start_time
 
+        # Map to output keys: source lang words → their key, translated → the other key
+        if source_lang == "vi":
+            english_words = all_translated_words
+            vietnamese_words = all_source_words
+            english_text = " ".join(translated_full_text)
+            vietnamese_text = " ".join([w["word"] for w in all_source_words])
+        else:
+            english_words = all_source_words
+            vietnamese_words = all_translated_words
+            english_text = " ".join([w["word"] for w in all_source_words])
+            vietnamese_text = " ".join(translated_full_text)
+
         return jsonify({
-            "english_words": all_english_words,
-            "vietnamese_words": all_vietnamese_words,
-            "english_text": " ".join([w["word"] for w in all_english_words]),
-            "vietnamese_text": " ".join(vietnamese_full_text),
+            "english_words": english_words,
+            "vietnamese_words": vietnamese_words,
+            "english_text": english_text,
+            "vietnamese_text": vietnamese_text,
             "segment_count": len(segments),
             "processing_time": round(total_time, 2),
-            "translation_mode": translation_mode
+            "translation_mode": translation_mode,
+            "source_lang": source_lang,
         })
 
     except Exception as e:
@@ -441,21 +507,24 @@ def transcribe_translate_stream():
     data             = request.get_json()
     segments         = data.get("segments", [])
     translation_mode = data.get("translation_mode", "segment")
+    source_lang      = data.get("source_lang", "en")  # "en" | "vi"
     total            = len(segments)
 
-    logger.info(f"⚡ Stream request: {total} segments")
+    logger.info(f"⚡ Stream request: {total} segments (source_lang={source_lang})")
+
+    translate_fn = translate_vi2en_batch if source_lang == "vi" else translate_en2vi_batch
 
     def generate():
         for idx, seg in enumerate(segments):
             try:
-                # ── BƯỚC 1: ASR (copy y chang từ /transcribe_translate) ──
+                # ── BƯỚC 1: ASR ──
                 audio_bytes = base64.b64decode(seg["audio_base64"])
                 audio       = np.frombuffer(audio_bytes, dtype=np.float32)
 
                 segments_gen, _ = asr_model.transcribe(
                     audio,
                     task="transcribe",
-                    language="en",
+                    language=source_lang,
                     word_timestamps=True,
                     beam_size=5,
                     vad_filter=False
@@ -481,27 +550,37 @@ def transcribe_translate_stream():
                     yield f"data: {json.dumps({'index': idx, 'total': total, 'skipped': True})}\n\n"
                     continue
 
-                # ── BƯỚC 2: MT (copy y chang từ /transcribe_translate) ──
-                segment_text = add_punctuation_simple(
-                    " ".join([w["word"] for w in segment_words])
-                )
-                vi_text  = translate_en2vi_batch([segment_text])[0]
-                vi_words = align_translation_to_words(
-                    segment_words, segment_text, vi_text
+                # ── BƯỚC 2: MT ──
+                segment_text    = add_punctuation_simple(" ".join([w["word"] for w in segment_words]))
+                translated_text = translate_fn([segment_text])[0]
+                translated_words = align_translation_to_words(
+                    segment_words, segment_text, translated_text
                 )
 
                 logger.info(f"  ✅ Segment {idx+1}/{total} done → yield ngay")
 
-                # ── BƯỚC 3: YIELD NGAY, không đợi segment tiếp theo ──
+                # Map to output keys based on source_lang
+                if source_lang == "vi":
+                    english_words    = translated_words
+                    vietnamese_words = segment_words
+                    english_text     = translated_text
+                    vietnamese_text  = segment_text
+                else:
+                    english_words    = segment_words
+                    vietnamese_words = translated_words
+                    english_text     = segment_text
+                    vietnamese_text  = translated_text
+
+                # ── BƯỚC 3: YIELD NGAY ──
                 payload = {
                     "index":             idx,
                     "total":             total,
                     "start_offset":      seg["start_offset"],
                     "end_offset":        seg["end_offset"],
-                    "english_words":     segment_words,
-                    "vietnamese_words":  vi_words,
-                    "english_text":      segment_text,
-                    "vietnamese_text":   vi_text,
+                    "english_words":     english_words,
+                    "vietnamese_words":  vietnamese_words,
+                    "english_text":      english_text,
+                    "vietnamese_text":   vietnamese_text,
                 }
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 

@@ -142,6 +142,7 @@ export async function uploadVideo(
   processMode: ProcessMode = "normal",
   translationMode: "segment" | "sentence" = "segment",
   onProgress?: (pct: number) => void,
+  sourceLang: "en" | "vi" = "en",
 ): Promise<string> {
   const authToken = await getAuthHeader();
 
@@ -150,6 +151,7 @@ export async function uploadVideo(
     form.append("file", file);
     form.append("process_mode", processMode);
     form.append("translation_mode", translationMode);
+    form.append("source_lang", sourceLang);
 
     const xhr = new XMLHttpRequest();
     xhr.upload.addEventListener("progress", (e) => {

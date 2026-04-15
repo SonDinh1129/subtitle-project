@@ -60,7 +60,7 @@ _job_event_queues: dict[str, queue.Queue] = {}
 _job_event_lock = threading.Lock()
 
 
-def create_job(filename: str, translation_mode: str, video_path: str, user_id: str | None = None) -> dict:
+def create_job(filename: str, translation_mode: str, video_path: str, user_id: str | None = None, source_lang: str = "en") -> dict:
     """Create a new job record and persist it."""
     job = {
         "job_id":           str(uuid.uuid4()),
@@ -69,6 +69,7 @@ def create_job(filename: str, translation_mode: str, video_path: str, user_id: s
         "status":           JobStatus.QUEUED,
         "progress":         0,
         "translation_mode": translation_mode,
+        "source_lang":      source_lang,
         "video_path":       video_path,
         "created_at":       time.time(),
         "error":            None,
@@ -177,12 +178,14 @@ class ColabClient:
         self,
         segments_data: list[dict],
         translation_mode: str = "segment",
+        source_lang: str = "en",
         timeout: int = 600,
         max_retries: int = 3,       # ← thêm retry
     ) -> dict:
         payload = {
             "segments":         segments_data,
             "translation_mode": translation_mode,
+            "source_lang":      source_lang,
         }
         
         last_error = None
@@ -212,6 +215,7 @@ class ColabClient:
         self,
         segments_data: list[dict],
         translation_mode: str = "segment",
+        source_lang: str = "en",
         timeout: int = 1200,
     ):
         """
@@ -221,6 +225,7 @@ class ColabClient:
         payload = {
             "segments": segments_data,
             "translation_mode": translation_mode,
+            "source_lang": source_lang,
         }
 
         with requests.post(
@@ -495,6 +500,7 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
 
     video_path       = job["video_path"]
     translation_mode = job["translation_mode"]
+    source_lang      = job.get("source_lang", "en")
     audio_path       = str(UPLOAD_DIR / f"{job_id}_audio.wav")
 
     try:
@@ -510,7 +516,7 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         segments_data = _prepare_segments(audio_path, min_duration=2.0)
 
         client = ColabClient(colab_url)
-        result = client.transcribe_translate(segments_data, translation_mode)
+        result = client.transcribe_translate(segments_data, translation_mode, source_lang=source_lang)
 
         english_words    = result["english_words"]
         vietnamese_words = result["vietnamese_words"]
@@ -560,6 +566,7 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
 
     video_path = job["video_path"]
     translation_mode = job["translation_mode"]
+    source_lang = job.get("source_lang", "en")
     audio_path = str(UPLOAD_DIR / f"{job_id}_audio.wav")
 
     try:
@@ -580,7 +587,7 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
         english_text_parts: list[str] = []
         vietnamese_text_parts: list[str] = []
 
-        for event in client.transcribe_translate_stream(segments_data, translation_mode):
+        for event in client.transcribe_translate_stream(segments_data, translation_mode, source_lang=source_lang):
             if event.get("type") == "done":
                 break
             if event.get("error"):

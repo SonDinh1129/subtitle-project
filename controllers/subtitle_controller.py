@@ -143,6 +143,10 @@ def upload_video():  # noqa: C901
     if process_mode not in ("normal", "realtime"):
         process_mode = "normal"
 
+    source_lang = request.form.get("source_lang", "en")
+    if source_lang not in ("en", "vi"):
+        source_lang = "en"
+
     # Gate: realtime requires premium
     if process_mode == "realtime" and not premium:
         return jsonify({"error": "Realtime mode requires premium", "code": "PREMIUM_REQUIRED"}), 403
@@ -158,6 +162,7 @@ def upload_video():  # noqa: C901
         translation_mode = translation_mode,
         video_path       = "",            # will be updated below
         user_id          = g.user_id,
+        source_lang      = source_lang,
     )
     job_id     = job["job_id"]
     video_path = str(UPLOAD_DIR / f"{job_id}_{safe_name}")

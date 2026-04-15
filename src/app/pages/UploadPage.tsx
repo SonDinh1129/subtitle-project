@@ -21,7 +21,10 @@ import {
 } from "lucide-react";
 
 const SUPPORTED_FORMATS = ["MP4", "MOV", "MKV", "AVI", "WEBM"];
-const LANGUAGES = [{ id: "english-only", en: "English only", vi: "Chỉ tiếng Anh" }];
+const LANGUAGES = [
+  { id: "en", en: "English → Vietnamese", vi: "Tiếng Anh → Tiếng Việt" },
+  { id: "vi", en: "Vietnamese → English", vi: "Tiếng Việt → Tiếng Anh" },
+];
 
 type UploadState = "idle" | "dragover" | "uploading" | "processing" | "done" | "error";
 
@@ -46,7 +49,7 @@ export function UploadPage() {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [language, setLanguage] = useState("english-only");
+  const [language, setLanguage] = useState("en");
   const [langOpen, setLangOpen] = useState(false);
   const [processingMsg, setProcessingMsg] = useState(isVi ? "Đang phân tích âm thanh..." : "Analyzing audio...");
   const [processMode, setProcessMode] = useState<ProcessMode>("normal");
@@ -75,7 +78,7 @@ export function UploadPage() {
       // uploadVideo trả về string (job_id trực tiếp)
       const jobId = await uploadVideo(file, processMode, "segment", (pct) => {
         setUploadProgress(pct);
-      });
+      }, language as "en" | "vi");
 
       sessionStorage.setItem("uploadedFileName", file.name);
       sessionStorage.setItem("subtitleProcessMode", processMode);
@@ -572,8 +575,8 @@ export function UploadPage() {
               </div>
               <p className="text-xs text-gray-400 dark:text-gray-300 mt-2">
                 {isVi
-                  ? "Mô hình hiện tại chỉ hỗ trợ luồng làm việc tiếng Anh"
-                  : "Current model supports English workflow only"}
+                  ? "Chọn ngôn ngữ của video để nhận phụ đề song ngữ"
+                  : "Select the video language to receive bilingual subtitles"}
               </p>
             </div>
 
