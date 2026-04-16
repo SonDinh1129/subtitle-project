@@ -16,7 +16,7 @@ import base64
 import threading
 import queue
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 import numpy as np
 import requests
@@ -305,6 +305,65 @@ def extract_audio_chunked(
     finally:
         if done_event:
             done_event.set()
+
+
+class ChunkProducer:
+    """Watch chunks_dir for completed WAV chunks, run VAD, yield encoded dicts."""
+
+    def __init__(self, chunks_dir: Path, done_event: threading.Event, chunk_seconds: int = 5):
+        self.chunks_dir = chunks_dir
+        self.done_event = done_event
+        self.chunk_seconds = chunk_seconds
+
+    def iter_chunks(self) -> Iterator[dict]:
+        """Yield chunk dicts as they become available on disk."""
+        next_idx = 0
+        while True:
+            chunk_files = sorted(self.chunks_dir.glob("chunk_*.wav"))
+            # Chunk N is closed when chunk N+1 exists OR when FFmpeg is done
+            ffmpeg_finished = self.done_event.is_set()
+            closed_count = len(chunk_files) if ffmpeg_finished else max(0, len(chunk_files) - 1)
+
+            for i in range(next_idx, closed_count):
+                chunk_path = self.chunks_dir / f"chunk_{i:04d}.wav"
+                if not chunk_path.exists():
+                    break
+                yield self._process_chunk(chunk_path, i)
+                next_idx = i + 1
+
+            if ffmpeg_finished and next_idx >= len(chunk_files):
+                break
+
+            time.sleep(0.5)
+
+    def _process_chunk(self, chunk_path: Path, chunk_index: int) -> dict:
+        """Run VAD on a single chunk, return encoded dict."""
+        start_offset = round(chunk_index * self.chunk_seconds, 2)
+
+        _, _, read_audio, _, _ = _vad_utils
+        wav = read_audio(str(chunk_path), sampling_rate=16000)
+        end_offset = round(start_offset + len(wav) / 16000.0, 2)
+
+        segments, _ = detect_speech_segments(str(chunk_path))
+        if not segments:
+            return {
+                "index": chunk_index,
+                "skipped": True,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+            }
+
+        audio_b64 = base64.b64encode(
+            wav.numpy().astype(np.float32).tobytes()
+        ).decode("utf-8")
+
+        return {
+            "index": chunk_index,
+            "audio_base64": audio_b64,
+            "start_offset": start_offset,
+            "end_offset": end_offset,
+            "skipped": False,
+        }
 
 
 def detect_speech_segments(audio_path: str) -> tuple[list[dict], torch.Tensor]:
