@@ -281,26 +281,16 @@ class ColabWsClient:
     ) -> Iterator[dict]:
         """
         Send chunks over WebSocket, yield result dicts.
-        Auto-reconnects on failure, resumes from last acked chunk.
+        Auto-reconnects on failure and retries the failed chunk.
         """
-        sent_buffer: list[dict] = []
-        last_acked = -1
         retry_count = 0
         ws: _ws_lib.WebSocket | None = None
 
         try:
             ws = self._connect()
 
-            def _chunk_source():
-                for chunk in sent_buffer[last_acked + 1:]:
-                    yield chunk
-                for chunk in chunks_iter:
-                    sent_buffer.append(chunk)
-                    yield chunk
-
-            for chunk in _chunk_source():
+            for chunk in chunks_iter:
                 if chunk.get("skipped"):
-                    last_acked = chunk["index"]
                     yield chunk
                     continue
 
@@ -315,7 +305,6 @@ class ColabWsClient:
                         ws.send(json.dumps(payload))
                         raw = ws.recv()
                         result = json.loads(raw)
-                        last_acked = chunk["index"]
                         retry_count = 0
                         yield result
                         break
