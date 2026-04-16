@@ -9,7 +9,7 @@ Combines English ASR + English-to-Vietnamese Translation
 # CELL 1: Install Dependencies
 # ============================================
 print("📦 Installing dependencies...")
-!pip install -q faster-whisper transformers torch sentencepiece flask flask-cors pyngrok ctranslate2
+!pip install -q faster-whisper transformers torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock
 
 print("✅ Dependencies installed!")
 
@@ -26,8 +26,9 @@ NGROK_TOKEN = "3CObzFT2HwMQBy49lYxjm89OzJq_7nc5YF9AGkgppvKcfi9bF"  # ← Thay đ
 ngrok.set_auth_token(NGROK_TOKEN)
 print("✅ ngrok configured!")
 # Sau đó mới tạo tunnel mới
-public_url = ngrok.connect(PORT)
-print(public_url)
+tunnel = ngrok.connect(PORT)
+public_url = tunnel.public_url  # plain URL string
+print(f"🌐 Tunnel: {public_url}")
 
 # ============================================
 # CELL 3: Load Models
@@ -289,8 +290,66 @@ def align_translation_to_words(
 def get_asr_model(source_lang: str):
     """Pick ASR model by source language while keeping faster-whisper API."""
     if source_lang == "vi":
+        logger.info("🇻🇳 Using PhoWhisper (vinai/PhoWhisper-large) for Vietnamese ASR")
         return phowhisper_model
+    logger.info("🇬🇧 Using Whisper large-v3 for English ASR")
     return asr_model
+
+
+def process_single_chunk(chunk_data: dict) -> dict:
+    """ASR + MT for a single audio chunk. Used by WS and HTTP endpoints."""
+    source_lang = chunk_data.get("source_lang", "en")
+    translation_mode = chunk_data.get("translation_mode", "segment")
+    active_asr = get_asr_model(source_lang)
+    translate_fn = translate_vi2en_batch if source_lang == "vi" else translate_en2vi_batch
+
+    audio_bytes = base64.b64decode(chunk_data["audio_base64"])
+    audio = np.frombuffer(audio_bytes, dtype=np.float32)
+    start_offset = chunk_data.get("start_offset", 0.0)
+
+    segments_gen, _ = active_asr.transcribe(
+        audio, task="transcribe", language=source_lang,
+        word_timestamps=True, beam_size=5, vad_filter=False,
+    )
+
+    words = []
+    for s in segments_gen:
+        if s.words:
+            for w in s.words:
+                if is_valid_word(w.word):
+                    words.append({
+                        "word": w.word.strip(),
+                        "start": round(start_offset + w.start, 2),
+                        "end": round(start_offset + w.end, 2),
+                    })
+
+    del audio, segments_gen
+    gc.collect()
+
+    if not words:
+        return {"index": chunk_data.get("index", 0), "skipped": True}
+
+    segment_text = add_punctuation_simple(" ".join(w["word"] for w in words))
+    translated_text = translate_fn([segment_text])[0]
+    translated_words = align_translation_to_words(words, segment_text, translated_text)
+
+    if source_lang == "vi":
+        en_words, vi_words = translated_words, words
+        en_text, vi_text = translated_text, segment_text
+    else:
+        en_words, vi_words = words, translated_words
+        en_text, vi_text = segment_text, translated_text
+
+    return {
+        "index": chunk_data.get("index", 0),
+        "start_offset": start_offset,
+        "end_offset": chunk_data.get("end_offset", 0.0),
+        "english_words": en_words,
+        "vietnamese_words": vi_words,
+        "english_text": en_text,
+        "vietnamese_text": vi_text,
+        "skipped": False,
+    }
 
 
 # ============================================
@@ -304,6 +363,8 @@ import gc
 
 app = Flask(__name__)
 CORS(app)
+from flask_sock import Sock
+sock = Sock(app)
 
 
 @app.route("/", methods=["GET"])
@@ -696,7 +757,8 @@ if __name__ == '__main__':
 
     try:
         ngrok.kill()
-        public_url = ngrok.connect(5000)
+        tunnel = ngrok.connect(5000)
+        public_url = tunnel.public_url  # extract plain URL string
 
         print("\n✅ Server is running!")
         print("="*60)
