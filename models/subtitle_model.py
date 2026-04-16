@@ -728,7 +728,8 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
 
 def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
     """
-    Realtime pipeline: process segments one-by-one and emit stream events.
+    Realtime pipeline with progressive chunked extraction + WebSocket.
+    First subtitle appears in ~7-11 seconds.
     """
     job = get_job(job_id)
     if not job:
@@ -737,46 +738,58 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
     video_path = job["video_path"]
     translation_mode = job["translation_mode"]
     source_lang = job.get("source_lang", "en")
-    audio_path = str(UPLOAD_DIR / f"{job_id}_audio.wav")
+
+    chunks_dir = UPLOAD_DIR / f"{job_id}_chunks"
+    chunks_dir.mkdir(exist_ok=True)
+    ffmpeg_done = threading.Event()
+    ffmpeg_error: list[Exception] = []
+
+    def _ffmpeg_target():
+        try:
+            extract_audio_chunked(video_path, chunks_dir, 5, ffmpeg_done)
+        except Exception as exc:
+            ffmpeg_error.append(exc)
 
     try:
+        # Step 1: Start FFmpeg chunked extraction in background
         update_job(job_id, status=JobStatus.EXTRACTING, progress=5)
-        extract_audio(video_path, audio_path)
+        ffmpeg_thread = threading.Thread(target=_ffmpeg_target, daemon=True)
+        ffmpeg_thread.start()
 
-        update_job(job_id, status=JobStatus.VAD, progress=20)
+        # Step 2: Stream chunks via WebSocket
+        update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
+        producer = ChunkProducer(chunks_dir, ffmpeg_done)
+        ws_client = ColabWsClient(colab_url)
 
-        update_job(job_id, status=JobStatus.TRANSCRIBING, progress=40)
-        segments_data = _prepare_segments(audio_path, min_duration=1.5)
-        total_segments = len(segments_data)
-        if total_segments == 0:
-            raise RuntimeError("No valid audio segments to process.")
-
-        client = ColabClient(colab_url)
         english_words: list[dict] = []
         vietnamese_words: list[dict] = []
         english_text_parts: list[str] = []
         vietnamese_text_parts: list[str] = []
+        chunk_count = 0
 
-        for event in client.transcribe_translate_stream(segments_data, translation_mode, source_lang=source_lang):
-            if event.get("type") == "done":
-                break
-            if event.get("error"):
-                raise RuntimeError(str(event.get("error")))
+        for event in ws_client.transcribe_stream_ws(
+            producer.iter_chunks(), source_lang, translation_mode,
+        ):
+            if ffmpeg_error:
+                raise ffmpeg_error[0]
 
-            idx = int(event.get("index", 0))
-            total = int(event.get("total", total_segments)) or total_segments
+            if event.get("skipped"):
+                chunk_count += 1
+                continue
+
             seg_en = event.get("english_words", [])
             seg_vi = event.get("vietnamese_words", [])
-
             english_words.extend(seg_en)
             vietnamese_words.extend(seg_vi)
 
             if event.get("english_text"):
-                english_text_parts.append(str(event.get("english_text", "")))
+                english_text_parts.append(event["english_text"])
             if event.get("vietnamese_text"):
-                vietnamese_text_parts.append(str(event.get("vietnamese_text", "")))
+                vietnamese_text_parts.append(event["vietnamese_text"])
 
-            progress = 30 + int(((idx + 1) / total) * 60)
+            chunk_count += 1
+            progress = min(90, 10 + chunk_count * 5)
+
             update_job(
                 job_id,
                 status=JobStatus.TRANSCRIBING,
@@ -787,26 +800,30 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
                 vietnamese_text="\n".join(vietnamese_text_parts),
             )
 
-            emit_job_event(
-                job_id,
-                {
-                    "type": "segment",
-                    "index": idx + 1,
-                    "total": total,
-                    "progress": progress,
-                    "english_words": seg_en,
-                    "vietnamese_words": seg_vi,
-                },
-            )
+            emit_job_event(job_id, {
+                "type": "segment",
+                "index": chunk_count,
+                "total": chunk_count,
+                "progress": progress,
+                "english_words": seg_en,
+                "vietnamese_words": seg_vi,
+            })
+
+        # Wait for FFmpeg to finish
+        ffmpeg_thread.join(timeout=10)
+        if ffmpeg_error:
+            raise ffmpeg_error[0]
+
+        # Step 3: Generate SRT files
+        if not english_words and not vietnamese_words:
+            raise RuntimeError("No speech detected in the video.")
 
         update_job(job_id, status=JobStatus.GENERATING, progress=90)
 
         en_srt_content = words_to_srt_string(english_words)
         vi_srt_content = words_to_srt_string(vietnamese_words)
-
         en_srt_path = str(OUTPUT_DIR / f"{job_id}_en.srt")
         vi_srt_path = str(OUTPUT_DIR / f"{job_id}_vi.srt")
-
         save_srt(en_srt_content, en_srt_path)
         save_srt(vi_srt_content, vi_srt_path)
 
@@ -828,6 +845,6 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
         emit_job_event(job_id, {"type": "error", "message": str(exc)})
 
     finally:
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
+        if chunks_dir.exists():
+            shutil.rmtree(chunks_dir, ignore_errors=True)
         _cleanup_job_queue(job_id)
