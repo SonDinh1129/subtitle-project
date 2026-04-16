@@ -24,6 +24,7 @@ import torch
 import ffmpeg
 import subprocess as _sp
 import shutil
+import websocket as _ws_lib
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -259,6 +260,97 @@ class ColabClient:
 
                 if isinstance(data, dict):
                     yield data
+
+
+class ColabWsClient:
+    """WebSocket client for chunked realtime streaming to Colab."""
+
+    BACKOFF = [2, 5, 10]  # retry delays in seconds
+    MAX_RETRIES = 3
+
+    def __init__(self, colab_url: str):
+        base = colab_url.rstrip("/")
+        self.ws_url = base.replace("https://", "wss://").replace("http://", "ws://") + "/ws/transcribe_stream"
+        self.headers = {"ngrok-skip-browser-warning": "true"}
+
+    def transcribe_stream_ws(
+        self,
+        chunks_iter: Iterator[dict],
+        source_lang: str,
+        translation_mode: str,
+    ) -> Iterator[dict]:
+        """
+        Send chunks over WebSocket, yield result dicts.
+        Auto-reconnects on failure, resumes from last acked chunk.
+        """
+        sent_buffer: list[dict] = []
+        last_acked = -1
+        retry_count = 0
+        ws: _ws_lib.WebSocket | None = None
+
+        try:
+            ws = self._connect()
+
+            def _chunk_source():
+                for chunk in sent_buffer[last_acked + 1:]:
+                    yield chunk
+                for chunk in chunks_iter:
+                    sent_buffer.append(chunk)
+                    yield chunk
+
+            for chunk in _chunk_source():
+                if chunk.get("skipped"):
+                    last_acked = chunk["index"]
+                    yield chunk
+                    continue
+
+                payload = {**chunk, "source_lang": source_lang, "translation_mode": translation_mode}
+
+                while True:
+                    try:
+                        if ws is None:
+                            ws = self._connect()
+                            retry_count = 0
+
+                        ws.send(json.dumps(payload))
+                        raw = ws.recv()
+                        result = json.loads(raw)
+                        last_acked = chunk["index"]
+                        retry_count = 0
+                        yield result
+                        break
+
+                    except (_ws_lib.WebSocketException, ConnectionError, OSError) as exc:
+                        if ws:
+                            try:
+                                ws.close()
+                            except Exception:
+                                pass
+                            ws = None
+
+                        if retry_count >= self.MAX_RETRIES:
+                            raise RuntimeError(
+                                f"WebSocket failed after {self.MAX_RETRIES} retries: {exc}"
+                            ) from exc
+
+                        delay = self.BACKOFF[min(retry_count, len(self.BACKOFF) - 1)]
+                        print(f"⚠️ WS error (retry {retry_count + 1}/{self.MAX_RETRIES}): {exc}. "
+                              f"Reconnecting in {delay}s...")
+                        time.sleep(delay)
+                        retry_count += 1
+
+        finally:
+            if ws:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+
+    def _connect(self) -> _ws_lib.WebSocket:
+        """Open a new WebSocket connection to Colab."""
+        ws = _ws_lib.WebSocket()
+        ws.connect(self.ws_url, header=self.headers, timeout=120)
+        return ws
 
 
 # ─────────────────────────────────────────────────────────────────
