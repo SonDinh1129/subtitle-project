@@ -17,26 +17,37 @@ print("✅ Dependencies installed!")
 # CELL 2: Setup ngrok
 # ============================================
 from pyngrok import ngrok
+# Kill tất cả tunnel cũ trước
+ngrok.kill()
+PORT = 5000
 
-# ⚠️ Khuyến nghị: lưu token vào environment thay vì hardcode
-import os
-
-NGROK_TOKEN = os.getenv("NGROK_TOKEN", "")
-if not NGROK_TOKEN:
-    raise RuntimeError("Missing NGROK_TOKEN. Set it before running this cell.")
-
+# ⚠️ THAY BẰNG TOKEN CỦA BẠN
+NGROK_TOKEN = "3CObzFT2HwMQBy49lYxjm89OzJq_7nc5YF9AGkgppvKcfi9bF"  # ← Thay đổi ở đây
 ngrok.set_auth_token(NGROK_TOKEN)
 print("✅ ngrok configured!")
+# Sau đó mới tạo tunnel mới
+public_url = ngrok.connect(PORT)
+print(public_url)
 
 # ============================================
 # CELL 3: Load Models
 # ============================================
+from google.colab import userdata  # ← thêm dòng này
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from faster_whisper import WhisperModel
 import subprocess
+import shutil  # ← thêm dòng này
+import sys
 import os
 import logging
+
+# Setup HF Token
+try:
+    os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
+    print("✅ HF Token loaded!")
+except:
+    print("⚠️ No HF_TOKEN found, continuing without auth (slower downloads)")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,31 +64,53 @@ logger.info("✅ ASR model loaded!")
 
 # Load PhoWhisper for Vietnamese ASR (converted to CTranslate2 for faster-whisper compatibility)
 logger.info("🔄 Preparing PhoWhisper-large (vi) for faster-whisper...")
+import subprocess
+import sys
+import os
+
 PHOWHISPER_CT2_PATH = "/content/models/phowhisper-large-ct2"
+if os.path.exists(PHOWHISPER_CT2_PATH):
+    shutil.rmtree(PHOWHISPER_CT2_PATH)
+    print("🗑️ Đã xóa cache lỗi!")
 
-if not os.path.exists(PHOWHISPER_CT2_PATH):
-    logger.info("⏳ Converting vinai/PhoWhisper-large to CTranslate2 (first run only)...")
-    result = subprocess.run(
-        [
-            "ct2-whisper-converter",
-            "--model", "vinai/PhoWhisper-large",
-            "--output_dir", PHOWHISPER_CT2_PATH,
-            "--quantization", "float16",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    logger.info(result.stdout)
-    if result.returncode != 0:
-        logger.error(result.stderr)
-        raise RuntimeError("PhoWhisper conversion failed")
+# Convert lại từ đầu
+print("⏳ Đang convert PhoWhisper-large...")
+result = subprocess.run(
+    [
+        "ct2-transformers-converter",
+        "--model", "vinai/PhoWhisper-large",
+        "--output_dir", PHOWHISPER_CT2_PATH,
+        "--quantization", "float16",
+        "--force",
+    ],
+    capture_output=True,
+    text=True,
+)
 
+if result.returncode != 0:
+    print("❌ Lỗi:", result.stderr)
+else:
+    print("✅ Convert thành công!")
+    print(result.stdout)
+
+# Kiểm tra file
+model_bin = os.path.join(PHOWHISPER_CT2_PATH, "model.bin")
+if os.path.exists(model_bin):
+    size_mb = os.path.getsize(model_bin) / (1024*1024)
+    print(f"📦 model.bin size: {size_mb:.1f} MB")
+    if size_mb < 100:
+        print("⚠️ File vẫn quá nhỏ, có thể bị lỗi!")
+    else:
+        print("✅ File size OK!")
+
+# Load PhoWhisper model vào faster-whisper
+logger.info("🔄 Loading PhoWhisper-large (ct2) into faster-whisper...")
 phowhisper_model = WhisperModel(
     PHOWHISPER_CT2_PATH,
     device="cuda",
     compute_type="float16",
 )
-logger.info("✅ PhoWhisper-large loaded!")
+logger.info("✅ PhoWhisper model loaded!")
 
 # Load MT Model (EN → VI)
 logger.info("🔄 Loading VinAI Translate EN→VI...")
@@ -537,7 +570,7 @@ def transcribe_translate_stream():
     ⚡ REALTIME STREAMING VERSION
     - Giống /transcribe_translate nhưng yield từng segment ngay khi xong
     - Không cần đợi toàn bộ pipeline hoàn tất
-    
+
     Request: (giống hệt /transcribe_translate)
     {
         "segments": [
@@ -546,7 +579,7 @@ def transcribe_translate_stream():
         ],
         "translation_mode": "segment"
     }
-    
+
     Response: SSE stream
         data: {"index": 0, "total": 5, "english_words": [...], "vietnamese_words": [...], ...}
         data: {"index": 1, "total": 5, ...}
@@ -685,3 +718,7 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         raise
+
+        !pip install ctranslate2
+!which ct2-whisper-converter
+!ls /usr/local/bin/ | grep ct2

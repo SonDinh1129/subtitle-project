@@ -405,8 +405,12 @@ export function EditorPage() {
     if (streamStatus === "done" || streamStatus === "error") return;
 
     setStreamStatus("streaming");
-    const stream = openRealtimeStream(currentJobId, {
+    let cancelled = false;
+    let es: EventSource | null = null;
+
+    openRealtimeStream(currentJobId, {
       onEvent: (evt: RealtimeStreamEvent) => {
+        if (cancelled) return;
         if (evt.type === "snapshot") {
           setStreamProgress(evt.progress ?? 0);
           setEnglishWords(evt.english_words ?? []);
@@ -437,12 +441,22 @@ export function EditorPage() {
         }
       },
       onError: () => {
+        if (cancelled) return;
         setStreamStatus("error");
         setStreamError("Lost connection to realtime stream.");
       },
+    }).then((stream) => {
+      if (cancelled) {
+        stream.close();
+      } else {
+        es = stream;
+      }
     });
 
-    return () => stream.close();
+    return () => {
+      cancelled = true;
+      es?.close();
+    };
   }, [isRealtimeMode, currentJobId, streamStatus]);
 
   useEffect(() => {
