@@ -22,6 +22,8 @@ import numpy as np
 import requests
 import torch
 import ffmpeg
+import subprocess as _sp
+import shutil
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -275,6 +277,34 @@ def extract_audio(video_path: str, output_wav: str) -> str:
         .run(overwrite_output=True, quiet=True)
     )
     return output_wav
+
+
+def extract_audio_chunked(
+    video_path: str,
+    chunks_dir: Path,
+    chunk_seconds: int = 5,
+    done_event: threading.Event | None = None,
+) -> None:
+    """
+    Extract audio from video as progressive WAV chunks.
+    Uses FFmpeg -f segment. Designed to run in a background thread.
+    Sets done_event when FFmpeg finishes (success or failure).
+    """
+    cmd = [
+        "ffmpeg", "-i", str(video_path),
+        "-f", "segment",
+        "-segment_time", str(chunk_seconds),
+        "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000",
+        "-y",
+        str(chunks_dir / "chunk_%04d.wav"),
+    ]
+    try:
+        _sp.run(cmd, capture_output=True, text=True, check=True)
+    except _sp.CalledProcessError as e:
+        raise RuntimeError(f"FFmpeg chunked extraction failed: {e.stderr[:500]}") from e
+    finally:
+        if done_event:
+            done_event.set()
 
 
 def detect_speech_segments(audio_path: str) -> tuple[list[dict], torch.Tensor]:
