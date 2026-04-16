@@ -99,6 +99,34 @@ def reset_usage(user_id: str) -> None:
 
 # ─── Auth decorators ──────────────────────────────────────────────────────────
 
+def _verify_user_id_with_supabase(token: str) -> str | None:
+    """Verify access token via Supabase Auth and return user id when valid."""
+    try:
+        supabase = _get_supabase_service()
+        user_resp = supabase.auth.get_user(token)
+        user = getattr(user_resp, 'user', None)
+        user_id = getattr(user, 'id', None)
+        return str(user_id) if user_id else None
+    except Exception:
+        return None
+
+
+def _verify_user_id_with_local_jwt(token: str) -> str | None:
+    """Verify access token locally with JWT secret (HS256 projects)."""
+    jwt_secret = os.getenv('SUPABASE_JWT_SECRET')
+    if not jwt_secret:
+        return None
+
+    payload = jwt.decode(
+        token,
+        jwt_secret,
+        algorithms=['HS256'],
+        audience='authenticated',
+    )
+    user_id = payload.get('sub')
+    return str(user_id) if user_id else None
+
+
 def require_auth(f):
     """
     Decorator: verify Supabase JWT and set g.user_id.
@@ -123,15 +151,18 @@ def require_auth(f):
         if not token:
             return jsonify({'error': 'Authentication required'}), 401
 
+        # Primary path: ask Supabase Auth to validate token.
+        user_id = _verify_user_id_with_supabase(token)
+        if user_id:
+            g.user_id = user_id
+            return f(*args, **kwargs)
+
+        # Fallback path: local HS256 validation for legacy setups.
         try:
-            jwt_secret = os.environ['SUPABASE_JWT_SECRET']
-            payload = jwt.decode(
-                token,
-                jwt_secret,
-                algorithms=['HS256'],
-                audience='authenticated',
-            )
-            g.user_id = payload['sub']
+            user_id = _verify_user_id_with_local_jwt(token)
+            if not user_id:
+                return jsonify({'error': 'Invalid token'}), 401
+            g.user_id = user_id
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token expired'}), 401
         except jwt.InvalidTokenError as exc:

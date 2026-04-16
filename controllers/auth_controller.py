@@ -14,7 +14,7 @@ auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.get('/me')
 @require_auth
-@limiter.limit("10/minute")
+@limiter.limit("60/minute")
 def get_me():
     """
     GET /api/auth/me

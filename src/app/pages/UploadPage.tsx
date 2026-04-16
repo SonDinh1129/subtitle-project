@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 const SUPPORTED_FORMATS = ["MP4", "MOV", "MKV", "AVI", "WEBM"];
+const SUPPORTED_EXTENSIONS = ["mp4", "mov", "mkv", "avi", "webm"];
 const LANGUAGES = [
   { id: "en", en: "English → Vietnamese", vi: "Tiếng Anh → Tiếng Việt" },
   { id: "vi", en: "Vietnamese → English", vi: "Tiếng Việt → Tiếng Anh" },
@@ -37,6 +38,12 @@ function formatDuration(secs: number): string {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function isLikelyVideoFile(file: File): boolean {
+  if (file.type.startsWith("video/")) return true;
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return SUPPORTED_EXTENSIONS.includes(ext);
 }
 
 export function UploadPage() {
@@ -64,8 +71,14 @@ export function UploadPage() {
   ];
 
   const handleRealUpload = useCallback(async (file: File) => {
+    if (!isLikelyVideoFile(file)) {
+      setUploadError(isVi ? "Định dạng tệp không được hỗ trợ. Hãy dùng MP4, MOV, MKV, AVI hoặc WEBM." : "Unsupported file format. Please use MP4, MOV, MKV, AVI, or WEBM.");
+      setState("error");
+      return;
+    }
+
     setSelectedFile(file);
-    if (file.type.startsWith("video/")) {
+    if (isLikelyVideoFile(file)) {
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
       sessionStorage.setItem("videoPreviewUrl", url);
@@ -122,7 +135,11 @@ export function UploadPage() {
         setUploadError(isVi ? "Đã đạt giới hạn 5 video/tháng. Nâng cấp Premium để tiếp tục." : "Monthly limit of 5 videos reached. Upgrade to Premium to continue.");
       } else if (msg.includes("PREMIUM_REQUIRED")) {
         setUploadError(isVi ? "Chế độ Realtime yêu cầu tài khoản Premium." : "Realtime mode requires a Premium account.");
+      } else if (msg.includes("Unsupported format") || msg.includes("File content does not match")) {
+        setUploadError(isVi ? "Tệp video không hợp lệ hoặc codec không được hỗ trợ. Hãy thử xuất lại dưới định dạng MP4 (H.264 + AAC)." : "Invalid video content or unsupported codec. Try re-exporting as MP4 (H.264 + AAC).");
+        setState("error");
       } else {
+        setUploadError(isVi ? "Không thể tải video lên. Vui lòng thử lại hoặc kiểm tra kết nối." : "Could not upload the video. Please try again or check your connection.");
         setState("error");
       }
     }
@@ -158,20 +175,30 @@ export function UploadPage() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setState("idle");
+      setUploadError(null);
       const file = e.dataTransfer.files[0];
-      if (file && file.type.startsWith("video/")) {
+      if (file && isLikelyVideoFile(file)) {
         handleRealUpload(file);
       } else {
+        setUploadError(isVi ? "Định dạng tệp không được hỗ trợ. Hãy dùng MP4, MOV, MKV, AVI hoặc WEBM." : "Unsupported file format. Please use MP4, MOV, MKV, AVI, or WEBM.");
         setState("error");
         setTimeout(() => setState("idle"), 3000);
       }
     },
-    [handleRealUpload]
+    [handleRealUpload, isVi]
   );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) handleRealUpload(file);
+    if (!file) return;
+    if (!isLikelyVideoFile(file)) {
+      setUploadError(isVi ? "Định dạng tệp không được hỗ trợ. Hãy dùng MP4, MOV, MKV, AVI hoặc WEBM." : "Unsupported file format. Please use MP4, MOV, MKV, AVI, or WEBM.");
+      setState("error");
+      setTimeout(() => setState("idle"), 3000);
+      return;
+    }
+    setUploadError(null);
+    handleRealUpload(file);
   };
 
   const handleReset = () => {
@@ -180,6 +207,7 @@ export function UploadPage() {
     setPreviewUrl(null);
     setUploadProgress(0);
     setProcessingProgress(0);
+    setUploadError(null);
     sessionStorage.removeItem("subtitleProcessMode");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };

@@ -8,12 +8,18 @@ import os
 from flask import Flask, send_from_directory
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
+from dotenv import load_dotenv
 
 from extensions import limiter
 from models.subtitle_model import load_vad
 from controllers.subtitle_controller import subtitle_bp
 from controllers.auth_controller import auth_bp
 from controllers.payment_controller import payment_bp
+
+
+# Load backend environment files for local development.
+load_dotenv(".env")
+load_dotenv(".env.local", override=True)
 
 
 def _resolve_colab_url() -> str:

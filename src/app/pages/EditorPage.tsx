@@ -892,11 +892,9 @@ export function EditorPage() {
                     onEnded={() => setIsPlaying(false)}
                   />
                 ) : (
-                  <ImageWithFallback
-                    src="..."
-                    alt="Video preview"
-                    className="w-full h-full object-cover"
-                  />
+                  <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-500 text-sm">
+                    No video preview available
+                  </div>
                 )}
 
                 {/* Subtitle Overlay */}

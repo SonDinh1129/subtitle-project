@@ -51,13 +51,18 @@ def _allowed(filename: str) -> bool:
 
 def _validate_video_magic(file_stream) -> bool:
     """Check file magic bytes to verify it's actually a video."""
-    header = file_stream.read(12)
+    header = file_stream.read(64)
     file_stream.seek(0)
     if len(header) < 4:
         return False
-    if header[4:8] == b"ftyp":          return True  # MP4/MOV
-    if header[:4] == b"\x1a\x45\xdf\xa3": return True  # MKV/WebM
-    if header[:4] == b"RIFF":           return True  # AVI
+
+    # MP4/MOV files are ISO-BMFF; many valid files include "ftyp" near the start.
+    if b"ftyp" in header[:32]:
+        return True
+    if header[:4] == b"\x1a\x45\xdf\xa3":
+        return True  # MKV/WebM
+    if header[:4] == b"RIFF" and b"AVI " in header[8:16]:
+        return True
     return False
 
 

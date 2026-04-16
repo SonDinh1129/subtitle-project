@@ -9,7 +9,7 @@ Combines English ASR + English-to-Vietnamese Translation
 # CELL 1: Install Dependencies
 # ============================================
 print("📦 Installing dependencies...")
-!pip install -q faster-whisper transformers torch sentencepiece flask flask-cors pyngrok
+!pip install -q faster-whisper transformers torch sentencepiece flask flask-cors pyngrok ctranslate2
 
 print("✅ Dependencies installed!")
 
@@ -18,8 +18,13 @@ print("✅ Dependencies installed!")
 # ============================================
 from pyngrok import ngrok
 
-# ⚠️ THAY BẰNG TOKEN CỦA BẠN
-NGROK_TOKEN = "38F4PHelZ9gVciG7xWzghX6PIz3_2aabWJ264C9QDQPJmPcKZ"  # ← Thay đổi ở đây
+# ⚠️ Khuyến nghị: lưu token vào environment thay vì hardcode
+import os
+
+NGROK_TOKEN = os.getenv("NGROK_TOKEN", "")
+if not NGROK_TOKEN:
+    raise RuntimeError("Missing NGROK_TOKEN. Set it before running this cell.")
+
 ngrok.set_auth_token(NGROK_TOKEN)
 print("✅ ngrok configured!")
 
@@ -29,6 +34,8 @@ print("✅ ngrok configured!")
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from faster_whisper import WhisperModel
+import subprocess
+import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +50,34 @@ asr_model = WhisperModel(
     download_root="/content/models"
 )
 logger.info("✅ ASR model loaded!")
+
+# Load PhoWhisper for Vietnamese ASR (converted to CTranslate2 for faster-whisper compatibility)
+logger.info("🔄 Preparing PhoWhisper-large (vi) for faster-whisper...")
+PHOWHISPER_CT2_PATH = "/content/models/phowhisper-large-ct2"
+
+if not os.path.exists(PHOWHISPER_CT2_PATH):
+    logger.info("⏳ Converting vinai/PhoWhisper-large to CTranslate2 (first run only)...")
+    result = subprocess.run(
+        [
+            "ct2-whisper-converter",
+            "--model", "vinai/PhoWhisper-large",
+            "--output_dir", PHOWHISPER_CT2_PATH,
+            "--quantization", "float16",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    logger.info(result.stdout)
+    if result.returncode != 0:
+        logger.error(result.stderr)
+        raise RuntimeError("PhoWhisper conversion failed")
+
+phowhisper_model = WhisperModel(
+    PHOWHISPER_CT2_PATH,
+    device="cuda",
+    compute_type="float16",
+)
+logger.info("✅ PhoWhisper-large loaded!")
 
 # Load MT Model (EN → VI)
 logger.info("🔄 Loading VinAI Translate EN→VI...")
@@ -218,6 +253,13 @@ def align_translation_to_words(
     return result
 
 
+def get_asr_model(source_lang: str):
+    """Pick ASR model by source language while keeping faster-whisper API."""
+    if source_lang == "vi":
+        return phowhisper_model
+    return asr_model
+
+
 # ============================================
 # CELL 5: Flask API
 # ============================================
@@ -237,14 +279,16 @@ def home():
         "service": "ASR + MT Microservice",
         "status": "running",
         "models": {
-            "asr": "whisper-large-v3",
+            "asr_en": "whisper-large-v3",
+            "asr_vi": "vinai/PhoWhisper-large (ct2)",
             "mt": "vinai-translate-en2vi-v2"
         },
         "endpoints": {
             "health": "/health",
             "transcribe_only": "/transcribe_only (POST)",
             "translate_only": "/translate_only (POST)",
-            "transcribe_translate": "/transcribe_translate (POST)"
+            "transcribe_translate": "/transcribe_translate (POST)",
+            "transcribe_translate_stream": "/transcribe_translate_stream (POST)"
         }
     })
 
@@ -253,7 +297,8 @@ def home():
 def health():
     return jsonify({
         "status": "healthy",
-        "asr_model": "whisper-large-v3",
+        "asr_model_en": "whisper-large-v3",
+        "asr_model_vi": "vinai/PhoWhisper-large (ct2)",
         "mt_en2vi_model": "vinai-translate-en2vi-v2",
         "mt_vi2en_model": "vinai-translate-vi2en-v2",
         "device": "cuda"
@@ -262,11 +307,13 @@ def health():
 
 @app.route("/transcribe_only", methods=["POST"])
 def transcribe_only():
-    """ASR only - English transcription"""
+    """ASR only - transcription for source_lang (en|vi)"""
     try:
         start_time = time.time()
         data = request.get_json()
         segments = data.get("segments", [])
+        source_lang = data.get("source_lang", "en")
+        active_asr = get_asr_model(source_lang)
 
         all_words = []
         total_audio = 0.0
@@ -276,10 +323,10 @@ def transcribe_only():
             audio = np.frombuffer(audio_bytes, dtype=np.float32)
             total_audio += len(audio) / 16000
 
-            segments_gen, _ = asr_model.transcribe(
+            segments_gen, _ = active_asr.transcribe(
                 audio,
                 task="transcribe",
-                language="en",
+                language=source_lang,
                 word_timestamps=True,
                 beam_size=5,
                 vad_filter=False
@@ -368,6 +415,7 @@ def transcribe_translate():
         segments = data.get("segments", [])
         translation_mode = data.get("translation_mode", "segment")
         source_lang = data.get("source_lang", "en")  # "en" | "vi"
+        active_asr = get_asr_model(source_lang)
 
         logger.info(f"📦 Processing {len(segments)} segments (source_lang={source_lang})...")
 
@@ -379,7 +427,7 @@ def transcribe_translate():
             audio_bytes = base64.b64decode(seg["audio_base64"])
             audio = np.frombuffer(audio_bytes, dtype=np.float32)
 
-            segments_gen, _ = asr_model.transcribe(
+            segments_gen, _ = active_asr.transcribe(
                 audio,
                 task="transcribe",
                 language=source_lang,
@@ -513,6 +561,7 @@ def transcribe_translate_stream():
     logger.info(f"⚡ Stream request: {total} segments (source_lang={source_lang})")
 
     translate_fn = translate_vi2en_batch if source_lang == "vi" else translate_en2vi_batch
+    active_asr = get_asr_model(source_lang)
 
     def generate():
         for idx, seg in enumerate(segments):
@@ -521,7 +570,7 @@ def transcribe_translate_stream():
                 audio_bytes = base64.b64decode(seg["audio_base64"])
                 audio       = np.frombuffer(audio_bytes, dtype=np.float32)
 
-                segments_gen, _ = asr_model.transcribe(
+                segments_gen, _ = active_asr.transcribe(
                     audio,
                     task="transcribe",
                     language=source_lang,

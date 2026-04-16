@@ -10,7 +10,37 @@
 
 import { supabase } from "./supabase";
 
-const BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:5000/api").replace(/\/$/, "");
+function _isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function _resolveBaseUrl(): string {
+  const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  const raw = (viteEnv?.VITE_API_URL ?? "/api").replace(/\/$/, "");
+
+  if (typeof window === "undefined") return raw;
+
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    const samePort = parsed.port === window.location.port;
+    const localAliasMismatch =
+      samePort &&
+      _isLoopbackHost(parsed.hostname) &&
+      _isLoopbackHost(window.location.hostname) &&
+      parsed.hostname !== window.location.hostname;
+
+    // Avoid CORS when only localhost/127.0.0.1 alias differs on the same local port.
+    if (localAliasMismatch && parsed.pathname.startsWith("/api")) {
+      return "/api";
+    }
+
+    return raw;
+  } catch {
+    return raw;
+  }
+}
+
+const BASE = _resolveBaseUrl();
 
 /** Returns "Bearer <token>" or null if no active session. */
 export async function getAuthHeader(): Promise<string | null> {
