@@ -365,6 +365,28 @@ CORS(app)
 from flask_sock import Sock
 sock = Sock(app)
 
+@sock.route("/ws/transcribe_stream")
+def transcribe_stream_ws(ws):
+    """WebSocket endpoint: receive audio chunks, return ASR+MT results one by one."""
+    logger.info("⚡ WS connection opened")
+    try:
+        while True:
+            data = ws.receive()
+            if data is None:
+                break
+            chunk = json.loads(data)
+            logger.info(f"  🔄 WS processing chunk {chunk.get('index', '?')} "
+                        f"(source_lang={chunk.get('source_lang', 'en')})")
+            result = process_single_chunk(chunk)
+            ws.send(json.dumps(result, ensure_ascii=False))
+            logger.info(f"  ✅ WS chunk {chunk.get('index', '?')} done"
+                        f" (skipped={result.get('skipped', False)})")
+    except Exception as e:
+        logger.error(f"WS error: {e}")
+        raise
+    finally:
+        logger.info("⚡ WS connection closed")
+
 
 @app.route("/", methods=["GET"])
 def home():
@@ -381,7 +403,8 @@ def home():
             "transcribe_only": "/transcribe_only (POST)",
             "translate_only": "/translate_only (POST)",
             "transcribe_translate": "/transcribe_translate (POST)",
-            "transcribe_translate_stream": "/transcribe_translate_stream (POST)"
+            "transcribe_translate_stream": "/transcribe_translate_stream (POST)",
+            "ws_transcribe_stream": "/ws/transcribe_stream (WebSocket)"
         }
     })
 
@@ -394,7 +417,8 @@ def health():
         "asr_model_vi": "vinai/PhoWhisper-large (ct2)",
         "mt_en2vi_model": "vinai-translate-en2vi-v2",
         "mt_vi2en_model": "vinai-translate-vi2en-v2",
-        "device": "cuda"
+        "device": "cuda",
+        "ws_endpoint": "/ws/transcribe_stream"
     })
 
 
