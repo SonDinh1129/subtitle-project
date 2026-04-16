@@ -299,7 +299,6 @@ def get_asr_model(source_lang: str):
 def process_single_chunk(chunk_data: dict) -> dict:
     """ASR + MT for a single audio chunk. Used by WS and HTTP endpoints."""
     source_lang = chunk_data.get("source_lang", "en")
-    translation_mode = chunk_data.get("translation_mode", "segment")
     active_asr = get_asr_model(source_lang)
     translate_fn = translate_vi2en_batch if source_lang == "vi" else translate_en2vi_batch
 
@@ -343,7 +342,7 @@ def process_single_chunk(chunk_data: dict) -> dict:
     return {
         "index": chunk_data.get("index", 0),
         "start_offset": start_offset,
-        "end_offset": chunk_data.get("end_offset", 0.0),
+        "end_offset": chunk_data.get("end_offset", start_offset + 5.0),
         "english_words": en_words,
         "vietnamese_words": vi_words,
         "english_text": en_text,
