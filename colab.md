@@ -19,7 +19,9 @@ print("✅ Dependencies installed!")
 # --no-deps: tránh moshi 0.2.13 downgrade huggingface-hub<1.0 (conflict với transformers 5.x)
 # sphn: audio dependency của moshi (cần cài riêng vì skip deps)
 !pip install -q moshi --no-deps
-!pip install -q sphn
+!pip install -q sphn --no-deps
+# Restore huggingface-hub sau khi sphn/moshi có thể đã downgrade nó
+!pip install -q "huggingface-hub>=1.3.0,<2.0" --upgrade
 print("✅ Kyutai moshi installed!")
 
 # ============================================
