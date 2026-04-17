@@ -438,14 +438,13 @@ export function EditorPage() {
         if (evt.type === "error") {
           setStreamStatus("error");
           setStreamError(evt.message || "Realtime stream failed.");
+          return;
         }
 
         if (evt.type === "segment_error") {
-          // Show a placeholder word entry for the failed segment
           const [start, end] = evt.time_range;
-          const placeholder = { word: "[...]", start, end };
-          setEnglishWords((prev) => [...prev, placeholder]);
-          setVietnameseWords((prev) => [...prev, placeholder]);
+          setEnglishWords((prev) => [...prev, { word: "[...]", start, end }]);
+          setVietnameseWords((prev) => [...prev, { word: "[...]", start, end }]);
           return;
         }
       },
