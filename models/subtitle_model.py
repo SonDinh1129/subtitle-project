@@ -298,9 +298,9 @@ class AudioStreamProducer:
                     "frame_index": frame_index,
                     "wall_time": time.time(),
                 }
-                frame_index += 1
                 # Throttle to real-time using absolute deadline
-                deadline = start_time + frame_index * self.FRAME_DURATION
+                deadline = start_time + (frame_index + 1) * self.FRAME_DURATION
+                frame_index += 1
                 sleep_for = deadline - time.time()
                 if sleep_for > 0:
                     time.sleep(sleep_for)
@@ -308,12 +308,11 @@ class AudioStreamProducer:
             proc.stdout.close()
             proc.wait()
 
-        yield {"type": "END"}
-
         if proc.returncode != 0:
             raise RuntimeError(
                 f"FFmpeg exited with code {proc.returncode} for {self.video_path}"
             )
+        yield {"type": "END"}
 
 
 class KyutaiStreamClient:
@@ -333,82 +332,68 @@ class KyutaiStreamClient:
     def stream(self, producer: AudioStreamProducer) -> Iterator[dict]:
         """
         Stream frames from producer to Kyutai WebSocket endpoint.
-        Yields result dicts as they arrive from the server.
+        Yields result dicts as they arrive from the server in real-time.
         Reconnects up to MAX_RETRIES times on disconnection.
         """
         result_queue: queue.Queue = queue.Queue()
+        _DONE = object()  # sentinel
 
-        async def _run_session(frame_iter):
-            """Open one WS session, run sender+receiver concurrently."""
-            loop = asyncio.get_running_loop()
-            send_queue: asyncio.Queue = asyncio.Queue()
+        async def _run():
+            retry_count = 0
+            while retry_count <= self.MAX_RETRIES:
+                try:
+                    async with websockets.connect(
+                        self.ws_url,
+                        additional_headers=self.headers,
+                        open_timeout=30,
+                    ) as ws:
+                        async def sender():
+                            loop = asyncio.get_running_loop()
+                            frame_iter = producer.iter_frames()
+                            while True:
+                                frame = await loop.run_in_executor(None, next, frame_iter, None)
+                                if frame is None:
+                                    break
+                                if frame.get("type") == "END":
+                                    await ws.send(json.dumps({"type": "END"}))
+                                    break
+                                await ws.send(json.dumps({
+                                    "pcm_base64": frame["pcm_base64"],
+                                    "frame_index": frame["frame_index"],
+                                }))
 
-            def _produce_frames():
-                """Runs in thread pool: iterates producer and feeds send_queue."""
-                for frame in frame_iter:
-                    # Put frame onto the asyncio queue (thread-safe call)
-                    loop.call_soon_threadsafe(send_queue.put_nowait, frame)
-                    if frame.get("type") == "END":
+                        async def receiver():
+                            async for raw in ws:
+                                try:
+                                    result_queue.put(json.loads(raw))
+                                except Exception:
+                                    pass
+
+                        await asyncio.gather(sender(), receiver())
+                        break  # success, exit retry loop
+                except Exception as exc:
+                    if retry_count >= self.MAX_RETRIES:
                         break
-                # Signal sender that production is done
-                loop.call_soon_threadsafe(send_queue.put_nowait, None)
+                    delay = self.BACKOFF[min(retry_count, len(self.BACKOFF) - 1)]
+                    print(
+                        f"⚠️ Kyutai WS error (retry {retry_count + 1}/{self.MAX_RETRIES}): "
+                        f"{exc}. Reconnecting in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    retry_count += 1
+            result_queue.put(_DONE)
 
-            async with websockets.connect(
-                self.ws_url,
-                additional_headers=self.headers,
-                open_timeout=30,
-            ) as ws:
-                async def sender():
-                    # Start frame producer in a thread so time.sleep() doesn't block the loop
-                    producer_future = loop.run_in_executor(None, _produce_frames)
-                    while True:
-                        frame = await send_queue.get()
-                        if frame is None:
-                            break
-                        if frame.get("type") == "END":
-                            await ws.send(json.dumps({"type": "END"}))
-                            break
-                        await ws.send(json.dumps({
-                            "pcm_base64": frame["pcm_base64"],
-                            "frame_index": frame["frame_index"],
-                        }))
-                    await producer_future
+        import threading as _threading
+        t = _threading.Thread(target=lambda: asyncio.run(_run()), daemon=True)
+        t.start()
 
-                async def receiver():
-                    async for raw in ws:
-                        try:
-                            result_queue.put(json.loads(raw))
-                        except Exception:
-                            pass
+        while True:
+            item = result_queue.get()
+            if item is _DONE:
+                break
+            yield item
 
-                await asyncio.gather(sender(), receiver())
-
-        retry_count = 0
-        frame_iter = producer.iter_frames()
-
-        while retry_count <= self.MAX_RETRIES:
-            try:
-                asyncio.run(_run_session(frame_iter))
-                break  # clean finish
-            except (websockets.exceptions.ConnectionClosed,
-                    websockets.exceptions.WebSocketException,
-                    OSError, ConnectionError) as exc:
-                retry_count += 1
-                if retry_count > self.MAX_RETRIES:
-                    raise RuntimeError(
-                        f"KyutaiStreamClient: WebSocket failed after "
-                        f"{self.MAX_RETRIES} retries: {exc}"
-                    ) from exc
-                delay = self.BACKOFF[min(retry_count - 1, len(self.BACKOFF) - 1)]
-                print(
-                    f"⚠️ Kyutai WS error (retry {retry_count}/{self.MAX_RETRIES}): "
-                    f"{exc}. Reconnecting in {delay}s..."
-                )
-                time.sleep(delay)
-
-        # Drain the result queue
-        while not result_queue.empty():
-            yield result_queue.get_nowait()
+        t.join()
 
 
 class ColabWsClient:
