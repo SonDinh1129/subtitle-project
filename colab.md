@@ -52,7 +52,7 @@ rust_proc = subprocess.Popen(
     ["/content/moshi_server", "--port", str(KYUTAI_PORT),
      "--model", "kyutai/stt-1b-en_fr"],
     stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,   # avoid pipe deadlock
 )
 
 def wait_for_kyutai(port, timeout=120):
@@ -434,10 +434,6 @@ def transcribe_stream_ws(ws):
 import asyncio
 import msgpack
 import websockets as _aio_ws
-from queue import Queue
-from threading import Thread
-
-KYUTAI_PORT = 7860  # must match Cell 2b (already defined above, use it if available)
 
 class WordSegmentAccumulator:
     """Accumulates words from Kyutai Rust, detects segment boundaries."""
@@ -484,6 +480,8 @@ class WordSegmentAccumulator:
 
     def flush(self):
         """Return accumulated words and reset state."""
+        if not self.words:
+            return [], None, None
         words = self.words
         start = self.segment_start
         end = words[-1]["end"]
@@ -496,35 +494,27 @@ class WordSegmentAccumulator:
         return bool(self.words)
 
 
-def _translate_worker(translate_queue, ws_send):
-    """Worker thread: translate accumulated EN segments and send results."""
-    while True:
-        item = translate_queue.get()
-        if item is None:
-            break
-        en_words, start, end = item
-        try:
-            en_text = add_punctuation_simple(" ".join(w["word"] for w in en_words))
-            vi_text = translate_en2vi_batch([en_text])[0]
-            vi_words = align_translation_to_words(en_words, en_text, vi_text)
-            ws_send(json.dumps({
-                "english_words": en_words,
-                "vietnamese_words": vi_words,
-                "english_text": en_text,
-                "vietnamese_text": vi_text,
-                "start": start,
-                "end": end,
-            }, ensure_ascii=False))
-        except Exception as e:
-            logger.exception("Translate worker failed for segment")
-            try:
-                ws_send(json.dumps({
-                    "type": "segment_error",
-                    "time_range": [start, end],
-                    "message": str(e),
-                }))
-            except Exception:
-                pass
+def _do_translate_segment(en_words, start, end):
+    """Translate a segment of EN words to VI. Returns JSON string to send to client."""
+    try:
+        en_text = add_punctuation_simple(" ".join(w["word"] for w in en_words))
+        vi_text = translate_en2vi_batch([en_text])[0]
+        vi_words = align_translation_to_words(en_words, en_text, vi_text)
+        return json.dumps({
+            "english_words": en_words,
+            "vietnamese_words": vi_words,
+            "english_text": en_text,
+            "vietnamese_text": vi_text,
+            "start": start,
+            "end": end,
+        }, ensure_ascii=False)
+    except Exception as e:
+        logger.exception("Translate segment failed")
+        return json.dumps({
+            "type": "segment_error",
+            "time_range": [start, end],
+            "message": str(e),
+        })
 
 
 @sock.route("/ws/transcribe_kyutai")
@@ -532,13 +522,6 @@ def transcribe_kyutai_ws(ws):
     """WebSocket endpoint: receive 80ms PCM frames, return EN+VI word results via Kyutai streaming ASR."""
     logger.info("⚡ Kyutai WS connection opened")
     accumulator = WordSegmentAccumulator()
-    translate_queue = Queue()
-    worker = Thread(
-        target=_translate_worker,
-        args=(translate_queue, ws.send),
-        daemon=True,
-    )
-    worker.start()
 
     async def proxy():
         kyutai_url = f"ws://localhost:{KYUTAI_PORT}/api/asr-streaming"
@@ -548,8 +531,9 @@ def transcribe_kyutai_ws(ws):
             ping_timeout=30,
             open_timeout=30,
         ) as kyutai_ws:
+            loop = asyncio.get_running_loop()
+
             async def forward_in():
-                loop = asyncio.get_running_loop()
                 while True:
                     data = await loop.run_in_executor(None, ws.receive)
                     if data is None:
@@ -565,17 +549,25 @@ def transcribe_kyutai_ws(ws):
                         use_single_float=True,
                     )
                     await kyutai_ws.send(packed)
+                # Close kyutai_ws to unblock forward_out's async-for
+                await kyutai_ws.close()
 
             async def forward_out():
+                # ws.send() called from asyncio thread; ws.receive() in executor thread.
+                # Flask-sock's full-duplex socket handles simultaneous read/write safely.
                 async for raw in kyutai_ws:
                     try:
                         msg = msgpack.unpackb(raw, raw=False)
                         now = time.time()
                         accumulator.add(msg, now)
                         if accumulator.should_flush(now):
-                            translate_queue.put(accumulator.flush())
+                            en_words, start, end = accumulator.flush()
+                            result_json = await loop.run_in_executor(
+                                None, _do_translate_segment, en_words, start, end
+                            )
+                            ws.send(result_json)
                     except Exception as e:
-                        logger.warning(f"Failed to parse Kyutai message: {e!r}")
+                        logger.warning(f"Failed to parse/process Kyutai message: {e!r}")
 
             await asyncio.gather(forward_in(), forward_out())
 
@@ -584,11 +576,13 @@ def transcribe_kyutai_ws(ws):
     except Exception as e:
         logger.error(f"Kyutai proxy error: {e}")
     finally:
-        # Flush any remaining words
+        # Flush any remaining words after stream ends
         if accumulator.has_words:
-            translate_queue.put(accumulator.flush())
-        translate_queue.put(None)
-        worker.join(timeout=10)
+            en_words, start, end = accumulator.flush()
+            try:
+                ws.send(_do_translate_segment(en_words, start, end))
+            except Exception as e:
+                logger.warning(f"Final flush failed: {e!r}")
         logger.info("⚡ Kyutai WS connection closed")
 
 
