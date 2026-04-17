@@ -549,8 +549,9 @@ def transcribe_kyutai_ws(ws):
             open_timeout=30,
         ) as kyutai_ws:
             async def forward_in():
+                loop = asyncio.get_running_loop()
                 while True:
-                    data = ws.receive()
+                    data = await loop.run_in_executor(None, ws.receive)
                     if data is None:
                         break
                     payload = json.loads(data)
@@ -846,7 +847,7 @@ def transcribe_translate():
         logger.error(f"Pipeline error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 # ============================================
-# CELL 5b: Streaming Endpoint (Premium / Realtime)
+# CELL 5c: Streaming Endpoint (Premium / Realtime)
 # ============================================
 from flask import stream_with_context, Response
 import json
