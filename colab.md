@@ -9,11 +9,11 @@ Combines English ASR + English-to-Vietnamese Translation
 # CELL 1: Install Dependencies
 # ============================================
 print("📦 Installing dependencies...")
-# Install everything except transformers first
 !pip install -q "huggingface-hub>=0.24.0,<1.0.0" faster-whisper torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock silero-vad
-# Uninstall transformers completely then reinstall 4.49.0 cleanly
-# (--force-reinstall leaves partial 5.0.0 file state → ImportError on mixed files)
-!pip uninstall -y transformers
+# Manually nuke Colab's pre-installed transformers 5.x directory before reinstalling
+# pip uninstall leaves mixed .pyc cache → ImportError on mismatched files
+!rm -rf /usr/local/lib/python3.12/dist-packages/transformers
+!rm -rf /usr/local/lib/python3.12/dist-packages/transformers-*.dist-info
 !pip install -q "transformers==4.49.0"
 print("✅ Dependencies installed!")
 

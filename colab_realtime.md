@@ -18,9 +18,10 @@ Endpoint: /ws/transcribe_kyutai
 print("📦 Installing dependencies...")
 # 1. moshi installs huggingface-hub 0.x + downgrades torch to <2.10 (its constraint)
 !pip install -q moshi
-# 2. Uninstall transformers completely (removes ALL files + pyc cache)
-#    then reinstall 4.49.0 cleanly — --force-reinstall leaves partial file state
-!pip uninstall -y transformers
+# 2. Nuke Colab's pre-installed transformers 5.x — pip uninstall leaves mixed .pyc
+#    cache files that cause ImportError on mismatched transformers versions
+!rm -rf /usr/local/lib/python3.12/dist-packages/transformers
+!rm -rf /usr/local/lib/python3.12/dist-packages/transformers-*.dist-info
 !pip install -q "transformers==4.49.0" "huggingface-hub>=0.24.0,<1.0.0"
 # 3. Other deps (torch already installed by moshi)
 !pip install -q sentencepiece flask flask-cors pyngrok flask-sock numpy
