@@ -11,9 +11,10 @@ Combines English ASR + English-to-Vietnamese Translation
 print("📦 Installing dependencies...")
 # Install everything except transformers first
 !pip install -q "huggingface-hub>=0.24.0,<1.0.0" faster-whisper torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock silero-vad
-# Force-reinstall transformers==4.49.0 to fully overwrite Colab's pre-installed 5.0.0
-# (pip install without --force-reinstall leaves partial 5.0.0 files → ImportError)
-!pip install -q --force-reinstall "transformers==4.49.0"
+# Uninstall transformers completely then reinstall 4.49.0 cleanly
+# (--force-reinstall leaves partial 5.0.0 file state → ImportError on mixed files)
+!pip uninstall -y transformers
+!pip install -q "transformers==4.49.0"
 print("✅ Dependencies installed!")
 
 # ============================================

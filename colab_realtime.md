@@ -18,10 +18,11 @@ Endpoint: /ws/transcribe_kyutai
 print("📦 Installing dependencies...")
 # 1. moshi installs huggingface-hub 0.x + downgrades torch to <2.10 (its constraint)
 !pip install -q moshi
-# 2. Force-reinstall transformers 4.x to fully overwrite Colab's pre-installed 5.0.0
-#    (partial files from 5.0.0 cause ImportError: cannot import name 'infer_framework')
-!pip install -q --force-reinstall "transformers==4.49.0" "huggingface-hub>=0.24.0,<1.0.0"
-# 3. Other deps (torch already installed by moshi, skip to avoid re-downgrade)
+# 2. Uninstall transformers completely (removes ALL files + pyc cache)
+#    then reinstall 4.49.0 cleanly — --force-reinstall leaves partial file state
+!pip uninstall -y transformers
+!pip install -q "transformers==4.49.0" "huggingface-hub>=0.24.0,<1.0.0"
+# 3. Other deps (torch already installed by moshi)
 !pip install -q sentencepiece flask flask-cors pyngrok flask-sock numpy
 print("✅ Dependencies installed!")
 
