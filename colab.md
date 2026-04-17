@@ -14,6 +14,17 @@ print("📦 Installing dependencies...")
 print("✅ Dependencies installed!")
 
 # ============================================
+# CELL 1b: Install Kyutai Dependencies
+# ============================================
+!pip install -q msgpack websockets
+
+# Download Kyutai Rust server binary
+# NOTE: Verify exact URL from https://github.com/kyutai-labs/delayed-streams-modeling/releases
+!wget -q https://github.com/kyutai-labs/delayed-streams-modeling/releases/latest/download/moshi_server -O /content/moshi_server
+!chmod +x /content/moshi_server
+print("✅ Kyutai deps installed, binary downloaded!")
+
+# ============================================
 # CELL 2: Setup ngrok
 # ============================================
 from pyngrok import ngrok
@@ -29,6 +40,34 @@ print("✅ ngrok configured!")
 tunnel = ngrok.connect(PORT)
 public_url = tunnel.public_url  # plain URL string
 print(f"🌐 Tunnel: {public_url}")
+
+# ============================================
+# CELL 2b: Start Kyutai Rust Server
+# ============================================
+import subprocess, socket, time
+
+KYUTAI_PORT = 7860
+
+rust_proc = subprocess.Popen(
+    ["/content/moshi_server", "--port", str(KYUTAI_PORT),
+     "--model", "kyutai/stt-1b-en_fr"],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+
+def wait_for_kyutai(port, timeout=120):
+    """Poll until Kyutai Rust server accepts TCP connections."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("localhost", port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(1)
+    raise TimeoutError(f"Kyutai server did not start within {timeout}s")
+
+wait_for_kyutai(KYUTAI_PORT)
+print(f"✅ Kyutai Rust server ready (PID {rust_proc.pid})")
 
 # ============================================
 # CELL 3: Load Models
@@ -387,6 +426,169 @@ def transcribe_stream_ws(ws):
         raise
     finally:
         logger.info("⚡ WS connection closed")
+
+
+# ============================================
+# CELL 5b: Kyutai Realtime WebSocket Endpoint
+# ============================================
+import asyncio
+import msgpack
+import websockets as _aio_ws
+from queue import Queue
+from threading import Thread
+
+KYUTAI_PORT = 7860  # must match Cell 2b (already defined above, use it if available)
+
+class WordSegmentAccumulator:
+    """Accumulates words from Kyutai Rust, detects segment boundaries."""
+
+    def __init__(self):
+        self.words = []
+        self.last_word_wall_time = 0.0
+        self.segment_start = None
+        self.last_vad_prob = 1.0
+
+    def add(self, msg, now_wall):
+        """Process a message from Kyutai Rust (Word or Step/VAD type)."""
+        msg_type = msg.get("type") if isinstance(msg, dict) else None
+        if msg_type == "Word":
+            word_text = (msg.get("text") or "").strip()
+            if not word_text:
+                return
+            if not self.words:
+                self.segment_start = msg.get("start", now_wall)
+            self.words.append({
+                "word": word_text,
+                "start": round(msg.get("start", now_wall), 2),
+                "end": round(msg.get("end", now_wall + 0.1), 2),
+            })
+            self.last_word_wall_time = now_wall
+        elif msg_type in ("Vad", "Step"):
+            # Kyutai may use "Vad" probability or "Step" with "prs" pause predictions
+            prob = msg.get("probability")
+            if prob is None:
+                prs = msg.get("prs")
+                prob = min(prs) if prs else 1.0
+            self.last_vad_prob = float(prob)
+
+    def should_flush(self, now_wall):
+        """Return True when a segment boundary is detected."""
+        if not self.words:
+            return False
+        duration = self.words[-1]["end"] - self.segment_start
+        return (
+            (self.last_vad_prob < 0.3 and duration >= 1.0)
+            or (now_wall - self.last_word_wall_time) > 1.5
+            or duration > 8.0
+        )
+
+    def flush(self):
+        """Return accumulated words and reset state."""
+        words = self.words
+        start = self.segment_start
+        end = words[-1]["end"]
+        self.words = []
+        self.segment_start = None
+        return words, start, end
+
+    @property
+    def has_words(self):
+        return bool(self.words)
+
+
+def _translate_worker(translate_queue, ws_send):
+    """Worker thread: translate accumulated EN segments and send results."""
+    while True:
+        item = translate_queue.get()
+        if item is None:
+            break
+        en_words, start, end = item
+        try:
+            en_text = add_punctuation_simple(" ".join(w["word"] for w in en_words))
+            vi_text = translate_en2vi_batch([en_text])[0]
+            vi_words = align_translation_to_words(en_words, en_text, vi_text)
+            ws_send(json.dumps({
+                "english_words": en_words,
+                "vietnamese_words": vi_words,
+                "english_text": en_text,
+                "vietnamese_text": vi_text,
+                "start": start,
+                "end": end,
+            }, ensure_ascii=False))
+        except Exception as e:
+            logger.exception("Translate worker failed for segment")
+            try:
+                ws_send(json.dumps({
+                    "type": "segment_error",
+                    "time_range": [start, end],
+                    "message": str(e),
+                }))
+            except Exception:
+                pass
+
+
+@sock.route("/ws/transcribe_kyutai")
+def transcribe_kyutai_ws(ws):
+    """WebSocket endpoint: receive 80ms PCM frames, return EN+VI word results via Kyutai streaming ASR."""
+    logger.info("⚡ Kyutai WS connection opened")
+    accumulator = WordSegmentAccumulator()
+    translate_queue = Queue()
+    worker = Thread(
+        target=_translate_worker,
+        args=(translate_queue, ws.send),
+        daemon=True,
+    )
+    worker.start()
+
+    async def proxy():
+        kyutai_url = f"ws://localhost:{KYUTAI_PORT}/api/asr-streaming"
+        async with _aio_ws.connect(
+            kyutai_url,
+            ping_interval=20,
+            ping_timeout=30,
+            open_timeout=30,
+        ) as kyutai_ws:
+            async def forward_in():
+                while True:
+                    data = ws.receive()
+                    if data is None:
+                        break
+                    payload = json.loads(data)
+                    if payload.get("type") == "END":
+                        break
+                    pcm = np.frombuffer(
+                        base64.b64decode(payload["pcm_base64"]), dtype=np.float32
+                    )
+                    packed = msgpack.packb(
+                        {"type": "Audio", "pcm": pcm.tolist()},
+                        use_single_float=True,
+                    )
+                    await kyutai_ws.send(packed)
+
+            async def forward_out():
+                async for raw in kyutai_ws:
+                    try:
+                        msg = msgpack.unpackb(raw, raw=False)
+                        now = time.time()
+                        accumulator.add(msg, now)
+                        if accumulator.should_flush(now):
+                            translate_queue.put(accumulator.flush())
+                    except Exception as e:
+                        logger.warning(f"Failed to parse Kyutai message: {e!r}")
+
+            await asyncio.gather(forward_in(), forward_out())
+
+    try:
+        asyncio.run(proxy())
+    except Exception as e:
+        logger.error(f"Kyutai proxy error: {e}")
+    finally:
+        # Flush any remaining words
+        if accumulator.has_words:
+            translate_queue.put(accumulator.flush())
+        translate_queue.put(None)
+        worker.join(timeout=10)
+        logger.info("⚡ Kyutai WS connection closed")
 
 
 @app.route("/", methods=["GET"])
