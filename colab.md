@@ -17,6 +17,8 @@ print("✅ Dependencies installed!")
 # CELL 1b: Install Kyutai
 # ============================================
 !pip install -q moshi
+# moshi downgrade huggingface-hub → force lại version tương thích transformers 5.x
+!pip install -q "huggingface-hub>=1.3.0,<2.0" --upgrade
 print("✅ Kyutai moshi installed!")
 
 # ============================================
