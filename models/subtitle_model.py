@@ -296,7 +296,6 @@ class AudioStreamProducer:
                 yield {
                     "pcm_base64": pcm_b64,
                     "frame_index": frame_index,
-                    "wall_time": time.time(),
                 }
                 # Throttle to real-time using absolute deadline
                 deadline = start_time + (frame_index + 1) * self.FRAME_DURATION
@@ -306,6 +305,7 @@ class AudioStreamProducer:
                     time.sleep(sleep_for)
         finally:
             proc.stdout.close()
+            proc.kill()    # ensure FFmpeg exits immediately
             proc.wait()
 
         if proc.returncode != 0:
@@ -346,6 +346,8 @@ class KyutaiStreamClient:
                         self.ws_url,
                         additional_headers=self.headers,
                         open_timeout=30,
+                        ping_interval=20,
+                        ping_timeout=30,
                     ) as ws:
                         async def sender():
                             loop = asyncio.get_running_loop()
@@ -366,8 +368,8 @@ class KyutaiStreamClient:
                             async for raw in ws:
                                 try:
                                     result_queue.put(json.loads(raw))
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    print(f"[KyutaiStreamClient] Failed to parse server message: {e!r}")
 
                         await asyncio.gather(sender(), receiver())
                         break  # success, exit retry loop
@@ -381,17 +383,22 @@ class KyutaiStreamClient:
                     )
                     await asyncio.sleep(delay)
                     retry_count += 1
+            if retry_count > self.MAX_RETRIES:
+                result_queue.put(RuntimeError(
+                    f"Kyutai WS failed after {self.MAX_RETRIES} retries"
+                ))
             result_queue.put(_DONE)
 
-        import threading as _threading
-        t = _threading.Thread(target=lambda: asyncio.run(_run()), daemon=True)
+        t = threading.Thread(target=lambda: asyncio.run(_run()), daemon=True)
         t.start()
 
         while True:
-            item = result_queue.get()
-            if item is _DONE:
+            result = result_queue.get()
+            if isinstance(result, Exception):
+                raise result
+            if result is _DONE:
                 break
-            yield item
+            yield result
 
         t.join()
 
@@ -878,10 +885,7 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
     ffmpeg_error: list[Exception] = []
     ffmpeg_thread: threading.Thread | None = None
 
-    if source_lang == "en":
-        # ── Kyutai streaming path ──────────────────────────────────
-        pass  # setup happens inside try block
-    else:
+    if source_lang != "en":
         chunks_dir = UPLOAD_DIR / f"{job_id}_chunks"
         chunks_dir.mkdir(exist_ok=True)
         ffmpeg_done = threading.Event()
