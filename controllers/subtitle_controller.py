@@ -183,8 +183,15 @@ def upload_video():  # noqa: C901
 
     # ── Start pipeline in background thread ───────────────────────
     colab_url = current_app.config["COLAB_URL"]
-    target = run_pipeline_realtime if process_mode == "realtime" else run_pipeline
-    t = threading.Thread(target=target, args=(job_id, colab_url), daemon=True)
+    if process_mode == "realtime":
+        colab_realtime_url = current_app.config.get("COLAB_REALTIME_URL", colab_url)
+        t = threading.Thread(
+            target=run_pipeline_realtime,
+            args=(job_id, colab_url, colab_realtime_url),
+            daemon=True,
+        )
+    else:
+        t = threading.Thread(target=run_pipeline, args=(job_id, colab_url), daemon=True)
     t.start()
 
     return jsonify({"job_id": job_id, "status": JobStatus.QUEUED, "process_mode": process_mode}), 200

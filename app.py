@@ -23,8 +23,8 @@ load_dotenv(".env.local", override=True)
 
 
 def _resolve_colab_url() -> str:
-    """Resolve and validate Colab endpoint from environment."""
-    value = os.getenv("COLAB_URL", "https://unresearched-unobnoxious-tyesha.ngrok-free.dev").strip()
+    """Resolve and validate Colab batch VM endpoint from environment."""
+    value = os.getenv("COLAB_URL", "https://your-ngrok-url.ngrok-free.dev").strip()
     if "your-ngrok-url" in value:
         raise RuntimeError(
             "COLAB_URL is still set to placeholder 'your-ngrok-url'. "
@@ -32,6 +32,16 @@ def _resolve_colab_url() -> str:
         )
     if not value.startswith("https://"):
         raise RuntimeError("COLAB_URL must start with 'https://'.")
+    return value.rstrip("/")
+
+
+def _resolve_colab_realtime_url() -> str:
+    """Resolve Colab realtime VM endpoint. Falls back to COLAB_URL if not set."""
+    value = os.getenv("COLAB_REALTIME_URL", "").strip()
+    if not value:
+        return ""  # controller will fall back to COLAB_URL
+    if not value.startswith("https://"):
+        raise RuntimeError("COLAB_REALTIME_URL must start with 'https://'.")
     return value.rstrip("/")
 
 
@@ -51,8 +61,10 @@ def create_app() -> Flask:
 
     # ── Config ────────────────────────────────────────────────────
     colab_url = _resolve_colab_url()
+    colab_realtime_url = _resolve_colab_realtime_url()
     app.config.update(
         COLAB_URL                  = colab_url,
+        COLAB_REALTIME_URL         = colab_realtime_url or colab_url,
         MAX_CONTENT_LENGTH         = 2 * 1024 * 1024 * 1024,   # 2 GB upload limit
         SECRET_KEY                 = os.getenv("SECRET_KEY", "dev-secret-change-in-prod"),
         SUPABASE_URL               = os.getenv("SUPABASE_URL", ""),
@@ -109,7 +121,8 @@ if __name__ == "__main__":
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
     print(f"\n🚀 SubAI backend running at http://localhost:5000")
-    print(f"   COLAB_URL = {application.config['COLAB_URL']}")
-    print(f"   Debug     = {debug}\n")
+    print(f"   COLAB_URL          = {application.config['COLAB_URL']}")
+    print(f"   COLAB_REALTIME_URL = {application.config['COLAB_REALTIME_URL']}")
+    print(f"   Debug              = {debug}\n")
 
     application.run(host="0.0.0.0", port=port, debug=debug)

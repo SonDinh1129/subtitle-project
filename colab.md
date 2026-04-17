@@ -14,17 +14,6 @@ print("📦 Installing dependencies...")
 print("✅ Dependencies installed!")
 
 # ============================================
-# CELL 1b: Install Kyutai
-# ============================================
-# --no-deps: tránh moshi 0.2.13 downgrade huggingface-hub<1.0 (conflict với transformers 5.x)
-# sphn: audio dependency của moshi (cần cài riêng vì skip deps)
-!pip install -q moshi --no-deps
-!pip install -q sphn --no-deps
-# Restore huggingface-hub sau khi sphn/moshi có thể đã downgrade nó
-!pip install -q "huggingface-hub>=1.3.0,<2.0" --upgrade
-print("✅ Kyutai moshi installed!")
-
-# ============================================
 # CELL 2: Setup ngrok
 # ============================================
 from pyngrok import ngrok
@@ -148,24 +137,6 @@ mt_vi2en_model = AutoModelForSeq2SeqLM.from_pretrained(
 )
 mt_vi2en_model.to(mt_device)
 logger.info("✅ MT VI→EN model loaded!")
-
-# ============================================
-# CELL 3b: Load Kyutai STT Model (PyTorch)
-# ============================================
-from moshi.models.loaders import CheckpointInfo
-
-logger.info("🔄 Loading Kyutai stt-1b-en_fr (PyTorch)...")
-kyutai_device = "cuda" if torch.cuda.is_available() else "cpu"
-
-_kyutai_ci = CheckpointInfo.from_hf_repo("kyutai/stt-1b-en_fr")
-kyutai_mimi = _kyutai_ci.get_mimi(device=kyutai_device)
-kyutai_lm   = _kyutai_ci.get_lm_gen(device=kyutai_device)
-kyutai_text_tokenizer = _kyutai_ci.text_tokenizer  # SentencePiece tokenizer
-
-kyutai_mimi.eval()
-kyutai_lm.eval()
-
-logger.info(f"✅ Kyutai STT loaded on {kyutai_device}! frame_size={kyutai_mimi.frame_size}")
 
 # ============================================
 # CELL 4: Helper Functions
@@ -416,142 +387,6 @@ def transcribe_stream_ws(ws):
         raise
     finally:
         logger.info("⚡ WS connection closed")
-
-
-# ============================================
-# CELL 5b: Kyutai Realtime WebSocket Endpoint
-# ============================================
-
-class WordSegmentAccumulator:
-    """Accumulates decoded words, detects segment boundaries for translation."""
-
-    def __init__(self):
-        self.words = []
-        self.last_word_wall_time = 0.0
-        self.segment_start = None
-
-    def add_word(self, word_text, timestamp, now_wall):
-        """Add a decoded word with its audio timestamp."""
-        if not self.words:
-            self.segment_start = timestamp
-        self.words.append({
-            "word": word_text,
-            "start": round(timestamp, 2),
-            "end": round(timestamp + 0.08, 2),
-        })
-        self.last_word_wall_time = now_wall
-
-    def should_flush(self, now_wall):
-        """Return True when a segment boundary is detected."""
-        if not self.words:
-            return False
-        duration = self.words[-1]["end"] - self.segment_start
-        return (
-            (now_wall - self.last_word_wall_time) > 1.5   # 1.5s silence
-            or duration > 8.0                               # hard cap
-        )
-
-    def flush(self):
-        """Return accumulated words and reset state."""
-        if not self.words:
-            return [], None, None
-        words = self.words
-        start = self.segment_start
-        end = words[-1]["end"]
-        self.words = []
-        self.segment_start = None
-        return words, start, end
-
-    @property
-    def has_words(self):
-        return bool(self.words)
-
-
-def _do_translate_segment(en_words, start, end):
-    """Translate a segment of EN words to VI. Returns JSON string to send to client."""
-    try:
-        en_text = add_punctuation_simple(" ".join(w["word"] for w in en_words))
-        vi_text = translate_en2vi_batch([en_text])[0]
-        vi_words = align_translation_to_words(en_words, en_text, vi_text)
-        return json.dumps({
-            "english_words": en_words,
-            "vietnamese_words": vi_words,
-            "english_text": en_text,
-            "vietnamese_text": vi_text,
-            "start": start,
-            "end": end,
-        }, ensure_ascii=False)
-    except Exception as e:
-        logger.exception("Translate segment failed")
-        return json.dumps({
-            "type": "segment_error",
-            "time_range": [start, end],
-            "message": str(e),
-        })
-
-
-@sock.route("/ws/transcribe_kyutai")
-def transcribe_kyutai_ws(ws):
-    """Receive 80ms PCM frames, stream through Kyutai PyTorch STT, translate EN→VI."""
-    logger.info("⚡ Kyutai WS connection opened")
-    accumulator = WordSegmentAccumulator()
-    frame_idx = 0
-    all_text_tokens = []
-    prev_decoded = ""
-
-    try:
-        with torch.no_grad(), kyutai_mimi.streaming(1), kyutai_lm.streaming(1):
-            while True:
-                data = ws.receive()
-                if data is None:
-                    break
-                payload = json.loads(data)
-                if payload.get("type") == "END":
-                    break
-
-                # Decode base64 PCM → [1, 1, frame_size] tensor
-                pcm = np.frombuffer(
-                    base64.b64decode(payload["pcm_base64"]), dtype=np.float32
-                )
-                audio_chunk = torch.from_numpy(pcm).to(kyutai_device)[None, None]
-
-                # One streaming step: audio → text token
-                audio_tokens = kyutai_mimi.encode(audio_chunk)
-                text_tokens  = kyutai_lm.step(audio_tokens)
-
-                if text_tokens is not None:
-                    token_id = int(text_tokens[0, 0, 0].item())
-                    if token_id > 0:  # filter padding tokens
-                        all_text_tokens.append(token_id)
-                        current_decoded = kyutai_text_tokenizer.decode(all_text_tokens)
-                        new_text = current_decoded[len(prev_decoded):]
-
-                        # Space after a token = previous word is complete
-                        if " " in new_text:
-                            parts = new_text.split(" ")
-                            for word_str in parts[:-1]:
-                                word_str = word_str.strip()
-                                if word_str:
-                                    timestamp = frame_idx * 0.08
-                                    now = time.time()
-                                    accumulator.add_word(word_str, timestamp, now)
-                                    if accumulator.should_flush(now):
-                                        en_words, start, end = accumulator.flush()
-                                        ws.send(_do_translate_segment(en_words, start, end))
-                            prev_decoded = current_decoded.rsplit(" ", 1)[0] + " "
-
-                frame_idx += 1
-
-    except Exception as e:
-        logger.error(f"Kyutai stream error: {e}")
-    finally:
-        if accumulator.has_words:
-            en_words, start, end = accumulator.flush()
-            try:
-                ws.send(_do_translate_segment(en_words, start, end))
-            except Exception as e:
-                logger.warning(f"Final flush failed: {e!r}")
-        logger.info("⚡ Kyutai WS connection closed")
 
 
 @app.route("/", methods=["GET"])

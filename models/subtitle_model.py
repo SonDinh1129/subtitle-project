@@ -868,7 +868,7 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         _cleanup_job_queue(job_id)
 
 
-def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
+def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str | None = None) -> None:
     """
     Realtime pipeline with progressive chunked extraction + WebSocket.
     First subtitle appears in ~7-11 seconds.
@@ -902,7 +902,7 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
             # Step: Kyutai streaming
             update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
             audio_producer = AudioStreamProducer(video_path)
-            kyutai_client = KyutaiStreamClient(colab_url)
+            kyutai_client = KyutaiStreamClient(colab_realtime_url or colab_url)
             event_iter = kyutai_client.stream(audio_producer)
         else:
             # Step 1: Start FFmpeg chunked extraction in background
