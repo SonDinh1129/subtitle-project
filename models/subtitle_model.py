@@ -25,6 +25,8 @@ import ffmpeg
 import subprocess as _sp
 import shutil
 import websocket as _ws_lib
+import asyncio
+import websockets
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -260,6 +262,153 @@ class ColabClient:
 
                 if isinstance(data, dict):
                     yield data
+
+
+class AudioStreamProducer:
+    """Read a video file via FFmpeg and yield 80ms PCM frames at real-time pace."""
+
+    FRAME_SAMPLES  = 1920       # 80ms @ 24kHz
+    FRAME_BYTES    = 7680       # 1920 * 4 bytes (float32)
+    FRAME_DURATION = 0.08       # seconds
+
+    def __init__(self, video_path: str):
+        self.video_path = video_path
+
+    def iter_frames(self) -> Iterator[dict]:
+        """Yield frame dicts throttled to real-time, then a sentinel {"type": "END"}."""
+        cmd = [
+            "ffmpeg", "-i", self.video_path,
+            "-vn",
+            "-ar", "24000",
+            "-ac", "1",
+            "-f", "f32le",
+            "pipe:1",
+        ]
+        proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.DEVNULL)
+        start_time = time.time()
+        frame_index = 0
+        try:
+            while True:
+                raw = proc.stdout.read(self.FRAME_BYTES)
+                if len(raw) < self.FRAME_BYTES:
+                    break
+                pcm_b64 = base64.b64encode(raw).decode("utf-8")
+                yield {
+                    "pcm_base64": pcm_b64,
+                    "frame_index": frame_index,
+                    "wall_time": time.time(),
+                }
+                frame_index += 1
+                # Throttle to real-time using absolute deadline
+                deadline = start_time + frame_index * self.FRAME_DURATION
+                sleep_for = deadline - time.time()
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+        finally:
+            proc.stdout.close()
+            proc.wait()
+
+        yield {"type": "END"}
+
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"FFmpeg exited with code {proc.returncode} for {self.video_path}"
+            )
+
+
+class KyutaiStreamClient:
+    """WebSocket client for Kyutai real-time ASR streaming."""
+
+    BACKOFF = [2, 5, 10]
+    MAX_RETRIES = 3
+
+    def __init__(self, colab_url: str):
+        base = colab_url.rstrip("/")
+        self.ws_url = (
+            base.replace("https://", "wss://").replace("http://", "ws://")
+            + "/ws/transcribe_kyutai"
+        )
+        self.headers = {"ngrok-skip-browser-warning": "true"}
+
+    def stream(self, producer: AudioStreamProducer) -> Iterator[dict]:
+        """
+        Stream frames from producer to Kyutai WebSocket endpoint.
+        Yields result dicts as they arrive from the server.
+        Reconnects up to MAX_RETRIES times on disconnection.
+        """
+        result_queue: queue.Queue = queue.Queue()
+
+        async def _run_session(frame_iter):
+            """Open one WS session, run sender+receiver concurrently."""
+            loop = asyncio.get_running_loop()
+            send_queue: asyncio.Queue = asyncio.Queue()
+
+            def _produce_frames():
+                """Runs in thread pool: iterates producer and feeds send_queue."""
+                for frame in frame_iter:
+                    # Put frame onto the asyncio queue (thread-safe call)
+                    loop.call_soon_threadsafe(send_queue.put_nowait, frame)
+                    if frame.get("type") == "END":
+                        break
+                # Signal sender that production is done
+                loop.call_soon_threadsafe(send_queue.put_nowait, None)
+
+            async with websockets.connect(
+                self.ws_url,
+                additional_headers=self.headers,
+                open_timeout=30,
+            ) as ws:
+                async def sender():
+                    # Start frame producer in a thread so time.sleep() doesn't block the loop
+                    producer_future = loop.run_in_executor(None, _produce_frames)
+                    while True:
+                        frame = await send_queue.get()
+                        if frame is None:
+                            break
+                        if frame.get("type") == "END":
+                            await ws.send(json.dumps({"type": "END"}))
+                            break
+                        await ws.send(json.dumps({
+                            "pcm_base64": frame["pcm_base64"],
+                            "frame_index": frame["frame_index"],
+                        }))
+                    await producer_future
+
+                async def receiver():
+                    async for raw in ws:
+                        try:
+                            result_queue.put(json.loads(raw))
+                        except Exception:
+                            pass
+
+                await asyncio.gather(sender(), receiver())
+
+        retry_count = 0
+        frame_iter = producer.iter_frames()
+
+        while retry_count <= self.MAX_RETRIES:
+            try:
+                asyncio.run(_run_session(frame_iter))
+                break  # clean finish
+            except (websockets.exceptions.ConnectionClosed,
+                    websockets.exceptions.WebSocketException,
+                    OSError, ConnectionError) as exc:
+                retry_count += 1
+                if retry_count > self.MAX_RETRIES:
+                    raise RuntimeError(
+                        f"KyutaiStreamClient: WebSocket failed after "
+                        f"{self.MAX_RETRIES} retries: {exc}"
+                    ) from exc
+                delay = self.BACKOFF[min(retry_count - 1, len(self.BACKOFF) - 1)]
+                print(
+                    f"⚠️ Kyutai WS error (retry {retry_count}/{self.MAX_RETRIES}): "
+                    f"{exc}. Reconnecting in {delay}s..."
+                )
+                time.sleep(delay)
+
+        # Drain the result queue
+        while not result_queue.empty():
+            yield result_queue.get_nowait()
 
 
 class ColabWsClient:
@@ -739,27 +888,45 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
     translation_mode = job["translation_mode"]
     source_lang = job.get("source_lang", "en")
 
-    chunks_dir = UPLOAD_DIR / f"{job_id}_chunks"
-    chunks_dir.mkdir(exist_ok=True)
-    ffmpeg_done = threading.Event()
+    chunks_dir: Path | None = None
+    ffmpeg_done: threading.Event | None = None
     ffmpeg_error: list[Exception] = []
+    ffmpeg_thread: threading.Thread | None = None
 
-    def _ffmpeg_target():
-        try:
-            extract_audio_chunked(video_path, chunks_dir, 5, ffmpeg_done)
-        except Exception as exc:
-            ffmpeg_error.append(exc)
+    if source_lang == "en":
+        # ── Kyutai streaming path ──────────────────────────────────
+        pass  # setup happens inside try block
+    else:
+        chunks_dir = UPLOAD_DIR / f"{job_id}_chunks"
+        chunks_dir.mkdir(exist_ok=True)
+        ffmpeg_done = threading.Event()
+
+        def _ffmpeg_target():
+            try:
+                extract_audio_chunked(video_path, chunks_dir, 5, ffmpeg_done)
+            except Exception as exc:
+                ffmpeg_error.append(exc)
 
     try:
-        # Step 1: Start FFmpeg chunked extraction in background
-        update_job(job_id, status=JobStatus.EXTRACTING, progress=5)
-        ffmpeg_thread = threading.Thread(target=_ffmpeg_target, daemon=True)
-        ffmpeg_thread.start()
+        if source_lang == "en":
+            # Step: Kyutai streaming
+            update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
+            audio_producer = AudioStreamProducer(video_path)
+            kyutai_client = KyutaiStreamClient(colab_url)
+            event_iter = kyutai_client.stream(audio_producer)
+        else:
+            # Step 1: Start FFmpeg chunked extraction in background
+            update_job(job_id, status=JobStatus.EXTRACTING, progress=5)
+            ffmpeg_thread = threading.Thread(target=_ffmpeg_target, daemon=True)
+            ffmpeg_thread.start()
 
-        # Step 2: Stream chunks via WebSocket
-        update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
-        producer = ChunkProducer(chunks_dir, ffmpeg_done)
-        ws_client = ColabWsClient(colab_url)
+            # Step 2: Stream chunks via WebSocket
+            update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
+            producer_chunk = ChunkProducer(chunks_dir, ffmpeg_done)
+            ws_client = ColabWsClient(colab_url)
+            event_iter = ws_client.transcribe_stream_ws(
+                producer_chunk.iter_chunks(), source_lang, translation_mode,
+            )
 
         english_words: list[dict] = []
         vietnamese_words: list[dict] = []
@@ -767,10 +934,12 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
         vietnamese_text_parts: list[str] = []
         chunk_count = 0
 
-        for event in ws_client.transcribe_stream_ws(
-            producer.iter_chunks(), source_lang, translation_mode,
-        ):
-            if ffmpeg_error:
+        for event in event_iter:
+            if event.get("type") == "segment_error":
+                emit_job_event(job_id, event)
+                continue
+
+            if source_lang != "en" and ffmpeg_error:
                 raise ffmpeg_error[0]
 
             if event.get("skipped"):
@@ -809,10 +978,11 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
                 "vietnamese_words": seg_vi,
             })
 
-        # Wait for FFmpeg to finish
-        ffmpeg_thread.join(timeout=10)
-        if ffmpeg_error:
-            raise ffmpeg_error[0]
+        # Wait for FFmpeg to finish (non-EN path only)
+        if source_lang != "en" and ffmpeg_thread is not None:
+            ffmpeg_thread.join(timeout=10)
+            if ffmpeg_error:
+                raise ffmpeg_error[0]
 
         # Step 3: Generate SRT files
         if not english_words and not vietnamese_words:
@@ -845,6 +1015,6 @@ def run_pipeline_realtime(job_id: str, colab_url: str) -> None:
         emit_job_event(job_id, {"type": "error", "message": str(exc)})
 
     finally:
-        if chunks_dir.exists():
+        if chunks_dir is not None and chunks_dir.exists():
             shutil.rmtree(chunks_dir, ignore_errors=True)
         _cleanup_job_queue(job_id)
