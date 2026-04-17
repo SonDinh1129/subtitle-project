@@ -9,7 +9,9 @@ Combines English ASR + English-to-Vietnamese Translation
 # CELL 1: Install Dependencies
 # ============================================
 print("📦 Installing dependencies...")
-!pip install -q faster-whisper transformers torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock silero-vad
+# Pin transformers 4.x + huggingface-hub 0.x: transformers 5.0.0 imports is_offline_mode
+# which was removed in huggingface-hub 1.11.0 — 4.x+0.x là fully compatible
+!pip install -q "transformers>=4.40.0,<5.0.0" "huggingface-hub>=0.24.0,<1.0.0" faster-whisper torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock silero-vad
 
 print("✅ Dependencies installed!")
 
