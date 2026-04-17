@@ -16,9 +16,10 @@ print("✅ Dependencies installed!")
 # ============================================
 # CELL 1b: Install Kyutai
 # ============================================
-!pip install -q moshi
-# moshi downgrade huggingface-hub → force lại version tương thích transformers 5.x
-!pip install -q "huggingface-hub>=1.3.0,<2.0" --upgrade
+# --no-deps: tránh moshi 0.2.13 downgrade huggingface-hub<1.0 (conflict với transformers 5.x)
+# sphn: audio dependency của moshi (cần cài riêng vì skip deps)
+!pip install -q moshi --no-deps
+!pip install -q sphn
 print("✅ Kyutai moshi installed!")
 
 # ============================================
