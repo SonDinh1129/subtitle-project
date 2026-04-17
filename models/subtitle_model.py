@@ -265,21 +265,25 @@ class ColabClient:
 
 
 class AudioStreamProducer:
-    """Read a video file via FFmpeg and yield 80ms PCM frames at real-time pace."""
+    """Read a video file via FFmpeg and yield PCM frames at real-time pace.
 
-    FRAME_SAMPLES  = 1920       # 80ms @ 24kHz
-    FRAME_BYTES    = 7680       # 1920 * 4 bytes (float32)
-    FRAME_DURATION = 0.08       # seconds
+    EN path: sample_rate=24000, frame_duration=0.08  → 1920 samples/frame (Kyutai)
+    VI path: sample_rate=16000, frame_duration=0.032 → 512 samples/frame  (Silero VAD)
+    """
 
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, sample_rate: int = 24000, frame_duration: float = 0.08):
         self.video_path = video_path
+        self.sample_rate = sample_rate
+        self.frame_duration = frame_duration
+        self.frame_samples = int(sample_rate * frame_duration)
+        self.frame_bytes = self.frame_samples * 4  # float32
 
     def iter_frames(self) -> Iterator[dict]:
         """Yield frame dicts throttled to real-time, then a sentinel {"type": "END"}."""
         cmd = [
             "ffmpeg", "-i", self.video_path,
             "-vn",
-            "-ar", "24000",
+            "-ar", str(self.sample_rate),
             "-ac", "1",
             "-f", "f32le",
             "pipe:1",
@@ -289,8 +293,8 @@ class AudioStreamProducer:
         frame_index = 0
         try:
             while True:
-                raw = proc.stdout.read(self.FRAME_BYTES)
-                if len(raw) < self.FRAME_BYTES:
+                raw = proc.stdout.read(self.frame_bytes)
+                if len(raw) < self.frame_bytes:
                     break
                 pcm_b64 = base64.b64encode(raw).decode("utf-8")
                 yield {
@@ -298,7 +302,7 @@ class AudioStreamProducer:
                     "frame_index": frame_index,
                 }
                 # Throttle to real-time using absolute deadline
-                deadline = start_time + (frame_index + 1) * self.FRAME_DURATION
+                deadline = start_time + (frame_index + 1) * self.frame_duration
                 frame_index += 1
                 sleep_for = deadline - time.time()
                 if sleep_for > 0:
@@ -316,17 +320,20 @@ class AudioStreamProducer:
         yield {"type": "END"}
 
 
-class KyutaiStreamClient:
-    """WebSocket client for Kyutai real-time ASR streaming."""
+class RealtimeStreamClient:
+    """Generic WebSocket client for frame-based real-time streaming ASR.
+
+    EN path: ws_path="/ws/transcribe_kyutai"       (VM1, Kyutai)
+    VI path: ws_path="/ws/transcribe_vi_realtime"  (VM2, Silero VAD + PhoWhisper)
+    """
 
     BACKOFF = [2, 5, 10]
     MAX_RETRIES = 3
 
-    def __init__(self, colab_url: str):
+    def __init__(self, colab_url: str, ws_path: str):
         base = colab_url.rstrip("/")
         self.ws_url = (
-            base.replace("https://", "wss://").replace("http://", "ws://")
-            + "/ws/transcribe_kyutai"
+            base.replace("https://", "wss://").replace("http://", "ws://") + ws_path
         )
         self.headers = {"ngrok-skip-browser-warning": "true"}
 
@@ -370,7 +377,7 @@ class KyutaiStreamClient:
                                 try:
                                     result_queue.put(json.loads(raw))
                                 except Exception as e:
-                                    print(f"[KyutaiStreamClient] Failed to parse server message: {e!r}")
+                                    print(f"[RealtimeStreamClient] Failed to parse server message: {e!r}")
 
                         await asyncio.gather(sender(), receiver())
                         break  # success, exit retry loop
@@ -379,14 +386,14 @@ class KyutaiStreamClient:
                         break
                     delay = self.BACKOFF[min(retry_count, len(self.BACKOFF) - 1)]
                     print(
-                        f"⚠️ Kyutai WS error (retry {retry_count + 1}/{self.MAX_RETRIES}): "
+                        f"⚠️ Realtime WS error (retry {retry_count + 1}/{self.MAX_RETRIES}): "
                         f"{exc}. Reconnecting in {delay}s..."
                     )
                     await asyncio.sleep(delay)
                     retry_count += 1
             if retry_count >= self.MAX_RETRIES:
                 result_queue.put(RuntimeError(
-                    f"Kyutai WS failed after {self.MAX_RETRIES} retries"
+                    f"Realtime WS failed after {self.MAX_RETRIES} retries"
                 ))
             result_queue.put(_DONE)
 
@@ -870,53 +877,28 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
 
 def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str | None = None) -> None:
     """
-    Realtime pipeline with progressive chunked extraction + WebSocket.
-    First subtitle appears in ~7-11 seconds.
+    Realtime pipeline using frame-by-frame streaming for both EN and VI.
+
+    EN → VM1 Kyutai (24kHz, 80ms frames) via /ws/transcribe_kyutai
+    VI → VM2 Silero VAD + PhoWhisper (16kHz, 32ms frames) via /ws/transcribe_vi_realtime
+    First subtitle appears in ~1-2s.
     """
     job = get_job(job_id)
     if not job:
         return
 
     video_path = job["video_path"]
-    translation_mode = job["translation_mode"]
     source_lang = job.get("source_lang", "en")
 
-    chunks_dir: Path | None = None
-    ffmpeg_done: threading.Event | None = None
-    ffmpeg_error: list[Exception] = []
-    ffmpeg_thread: threading.Thread | None = None
-
-    if source_lang != "en":
-        chunks_dir = UPLOAD_DIR / f"{job_id}_chunks"
-        chunks_dir.mkdir(exist_ok=True)
-        ffmpeg_done = threading.Event()
-
-        def _ffmpeg_target():
-            try:
-                extract_audio_chunked(video_path, chunks_dir, 5, ffmpeg_done)
-            except Exception as exc:
-                ffmpeg_error.append(exc)
-
     try:
+        update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
         if source_lang == "en":
-            # Step: Kyutai streaming
-            update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
-            audio_producer = AudioStreamProducer(video_path)
-            kyutai_client = KyutaiStreamClient(colab_realtime_url or colab_url)
-            event_iter = kyutai_client.stream(audio_producer)
+            audio_producer = AudioStreamProducer(video_path, sample_rate=24000, frame_duration=0.08)
+            client = RealtimeStreamClient(colab_realtime_url or colab_url, "/ws/transcribe_kyutai")
         else:
-            # Step 1: Start FFmpeg chunked extraction in background
-            update_job(job_id, status=JobStatus.EXTRACTING, progress=5)
-            ffmpeg_thread = threading.Thread(target=_ffmpeg_target, daemon=True)
-            ffmpeg_thread.start()
-
-            # Step 2: Stream chunks via WebSocket
-            update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
-            producer_chunk = ChunkProducer(chunks_dir, ffmpeg_done)
-            ws_client = ColabWsClient(colab_url)
-            event_iter = ws_client.transcribe_stream_ws(
-                producer_chunk.iter_chunks(), source_lang, translation_mode,
-            )
+            audio_producer = AudioStreamProducer(video_path, sample_rate=16000, frame_duration=0.032)
+            client = RealtimeStreamClient(colab_url, "/ws/transcribe_vi_realtime")
+        event_iter = client.stream(audio_producer)
 
         english_words: list[dict] = []
         vietnamese_words: list[dict] = []
@@ -928,9 +910,6 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
             if event.get("type") == "segment_error":
                 emit_job_event(job_id, event)
                 continue
-
-            if source_lang != "en" and ffmpeg_error:
-                raise ffmpeg_error[0]
 
             if event.get("skipped"):
                 chunk_count += 1
@@ -968,12 +947,6 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
                 "vietnamese_words": seg_vi,
             })
 
-        # Wait for FFmpeg to finish (non-EN path only)
-        if source_lang != "en" and ffmpeg_thread is not None:
-            ffmpeg_thread.join(timeout=10)
-            if ffmpeg_error:
-                raise ffmpeg_error[0]
-
         # Step 3: Generate SRT files
         if not english_words and not vietnamese_words:
             raise RuntimeError("No speech detected in the video.")
@@ -1005,6 +978,4 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
         emit_job_event(job_id, {"type": "error", "message": str(exc)})
 
     finally:
-        if chunks_dir is not None and chunks_dir.exists():
-            shutil.rmtree(chunks_dir, ignore_errors=True)
         _cleanup_job_queue(job_id)

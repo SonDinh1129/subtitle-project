@@ -9,7 +9,7 @@ Combines English ASR + English-to-Vietnamese Translation
 # CELL 1: Install Dependencies
 # ============================================
 print("📦 Installing dependencies...")
-!pip install -q faster-whisper transformers torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock
+!pip install -q faster-whisper transformers torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock silero-vad
 
 print("✅ Dependencies installed!")
 
@@ -137,6 +137,12 @@ mt_vi2en_model = AutoModelForSeq2SeqLM.from_pretrained(
 )
 mt_vi2en_model.to(mt_device)
 logger.info("✅ MT VI→EN model loaded!")
+
+# Load Silero VAD for VI realtime streaming (runs on CPU)
+logger.info("🔄 Loading Silero VAD...")
+from silero_vad import load_silero_vad, VADIterator as SileroVADIterator
+silero_vad_model = load_silero_vad()
+logger.info("✅ Silero VAD loaded!")
 
 # ============================================
 # CELL 4: Helper Functions
@@ -387,6 +393,121 @@ def transcribe_stream_ws(ws):
         raise
     finally:
         logger.info("⚡ WS connection closed")
+
+
+# ============================================
+# CELL 5b: VI Realtime WebSocket Endpoint
+# ============================================
+
+def _transcribe_translate_vi(audio_np, start_offset):
+    """Transcribe a VAD-segmented Vietnamese audio chunk and translate to English."""
+    try:
+        segments_gen, _ = phowhisper_model.transcribe(
+            audio_np,
+            task="transcribe",
+            language="vi",
+            word_timestamps=True,
+            beam_size=5,
+            vad_filter=False,
+        )
+        vi_words = []
+        for s in segments_gen:
+            if s.words:
+                for w in s.words:
+                    if is_valid_word(w.word):
+                        vi_words.append({
+                            "word": w.word.strip(),
+                            "start": round(start_offset + w.start, 2),
+                            "end": round(start_offset + w.end, 2),
+                        })
+        if not vi_words:
+            return None
+        vi_text = add_punctuation_simple(" ".join(w["word"] for w in vi_words))
+        en_text = translate_vi2en_batch([vi_text])[0]
+        en_words = align_translation_to_words(vi_words, vi_text, en_text)
+        return json.dumps({
+            "english_words": en_words,
+            "vietnamese_words": vi_words,
+            "english_text": en_text,
+            "vietnamese_text": vi_text,
+            "start": vi_words[0]["start"],
+            "end": vi_words[-1]["end"],
+        }, ensure_ascii=False)
+    except Exception as e:
+        logger.exception("VI realtime transcribe+translate failed")
+        end = round(start_offset + len(audio_np) / 16000, 2)
+        return json.dumps({
+            "type": "segment_error",
+            "time_range": [round(start_offset, 2), end],
+            "message": str(e),
+        })
+
+
+@sock.route("/ws/transcribe_vi_realtime")
+def transcribe_vi_realtime_ws(ws):
+    """Receive 32ms frames @ 16kHz, use Silero VAD to detect speech boundaries,
+    transcribe with PhoWhisper, translate VI→EN with VinAI."""
+    logger.info("⚡ VI Realtime WS connection opened")
+
+    vad_iterator = SileroVADIterator(
+        silero_vad_model,
+        sampling_rate=16000,
+        threshold=0.5,
+        min_silence_duration_ms=300,
+        speech_pad_ms=100,
+    )
+
+    FRAME_DURATION = 0.032  # 32ms per frame
+    audio_buffer = []
+    buffer_start_frame = 0
+    frame_idx = 0
+    is_buffering = False
+
+    try:
+        while True:
+            data = ws.receive()
+            if data is None:
+                break
+            payload = json.loads(data)
+            if payload.get("type") == "END":
+                break
+
+            pcm = np.frombuffer(base64.b64decode(payload["pcm_base64"]), dtype=np.float32)
+            audio_tensor = torch.from_numpy(pcm)
+
+            speech_event = vad_iterator(audio_tensor, return_seconds=False)
+
+            if speech_event:
+                if "start" in speech_event:
+                    is_buffering = True
+                    buffer_start_frame = frame_idx
+                    audio_buffer = [pcm]
+                elif "end" in speech_event:
+                    if is_buffering:
+                        audio_buffer.append(pcm)
+                        start_offset = buffer_start_frame * FRAME_DURATION
+                        result = _transcribe_translate_vi(np.concatenate(audio_buffer), start_offset)
+                        if result:
+                            ws.send(result)
+                    audio_buffer = []
+                    is_buffering = False
+            elif is_buffering:
+                audio_buffer.append(pcm)
+
+            frame_idx += 1
+
+    except Exception as e:
+        logger.error(f"VI realtime stream error: {e}")
+    finally:
+        if is_buffering and audio_buffer:
+            start_offset = buffer_start_frame * FRAME_DURATION
+            result = _transcribe_translate_vi(np.concatenate(audio_buffer), start_offset)
+            if result:
+                try:
+                    ws.send(result)
+                except Exception as e:
+                    logger.warning(f"Final flush failed: {e!r}")
+        logger.info("⚡ VI Realtime WS connection closed")
 
 
 @app.route("/", methods=["GET"])
