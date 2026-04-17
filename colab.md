@@ -14,15 +14,10 @@ print("📦 Installing dependencies...")
 print("✅ Dependencies installed!")
 
 # ============================================
-# CELL 1b: Install Kyutai Dependencies
+# CELL 1b: Install Kyutai
 # ============================================
-!pip install -q msgpack websockets
-
-# Download Kyutai Rust server binary
-# NOTE: Verify exact URL from https://github.com/kyutai-labs/delayed-streams-modeling/releases
-!wget -q https://github.com/kyutai-labs/delayed-streams-modeling/releases/latest/download/moshi_server -O /content/moshi_server
-!chmod +x /content/moshi_server
-print("✅ Kyutai deps installed, binary downloaded!")
+!pip install -q moshi
+print("✅ Kyutai moshi installed!")
 
 # ============================================
 # CELL 2: Setup ngrok
@@ -42,32 +37,22 @@ public_url = tunnel.public_url  # plain URL string
 print(f"🌐 Tunnel: {public_url}")
 
 # ============================================
-# CELL 2b: Start Kyutai Rust Server
+# CELL 2b: Load Kyutai STT Model (PyTorch)
 # ============================================
-import subprocess, socket, time
+from moshi.models.loaders import CheckpointInfo
 
-KYUTAI_PORT = 7860
+logger.info("🔄 Loading Kyutai stt-1b-en_fr (PyTorch)...")
+kyutai_device = "cuda" if torch.cuda.is_available() else "cpu"
 
-rust_proc = subprocess.Popen(
-    ["/content/moshi_server", "--port", str(KYUTAI_PORT),
-     "--model", "kyutai/stt-1b-en_fr"],
-    stdout=subprocess.DEVNULL,   # avoid pipe buffer deadlock
-    stderr=subprocess.DEVNULL,
-)
+_kyutai_ci = CheckpointInfo.from_hf_repo("kyutai/stt-1b-en_fr")
+kyutai_mimi = _kyutai_ci.get_mimi(device=kyutai_device)
+kyutai_lm   = _kyutai_ci.get_lm_gen(device=kyutai_device)
+kyutai_text_tokenizer = _kyutai_ci.text_tokenizer  # SentencePiece tokenizer
 
-def wait_for_kyutai(port, timeout=120):
-    """Poll until Kyutai Rust server accepts TCP connections."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection(("localhost", port), timeout=1):
-                return True
-        except OSError:
-            time.sleep(1)
-    raise TimeoutError(f"Kyutai server did not start within {timeout}s")
+kyutai_mimi.eval()
+kyutai_lm.eval()
 
-wait_for_kyutai(KYUTAI_PORT)
-print(f"✅ Kyutai Rust server ready (PID {rust_proc.pid})")
+logger.info(f"✅ Kyutai STT loaded on {kyutai_device}! frame_size={kyutai_mimi.frame_size}")
 
 # ============================================
 # CELL 3: Load Models
@@ -431,41 +416,25 @@ def transcribe_stream_ws(ws):
 # ============================================
 # CELL 5b: Kyutai Realtime WebSocket Endpoint
 # ============================================
-import asyncio
-import msgpack
-import websockets as _aio_ws
 
 class WordSegmentAccumulator:
-    """Accumulates words from Kyutai Rust, detects segment boundaries."""
+    """Accumulates decoded words, detects segment boundaries for translation."""
 
     def __init__(self):
         self.words = []
         self.last_word_wall_time = 0.0
         self.segment_start = None
-        self.last_vad_prob = 1.0
 
-    def add(self, msg, now_wall):
-        """Process a message from Kyutai Rust (Word or Step/VAD type)."""
-        msg_type = msg.get("type") if isinstance(msg, dict) else None
-        if msg_type == "Word":
-            word_text = (msg.get("text") or "").strip()
-            if not word_text:
-                return
-            if not self.words:
-                self.segment_start = msg.get("start", now_wall)
-            self.words.append({
-                "word": word_text,
-                "start": round(msg.get("start", now_wall), 2),
-                "end": round(msg.get("end", now_wall + 0.1), 2),
-            })
-            self.last_word_wall_time = now_wall
-        elif msg_type in ("Vad", "Step"):
-            # Kyutai may use "Vad" probability or "Step" with "prs" pause predictions
-            prob = msg.get("probability")
-            if prob is None:
-                prs = msg.get("prs")
-                prob = min(prs) if prs else 1.0
-            self.last_vad_prob = float(prob)
+    def add_word(self, word_text, timestamp, now_wall):
+        """Add a decoded word with its audio timestamp."""
+        if not self.words:
+            self.segment_start = timestamp
+        self.words.append({
+            "word": word_text,
+            "start": round(timestamp, 2),
+            "end": round(timestamp + 0.08, 2),
+        })
+        self.last_word_wall_time = now_wall
 
     def should_flush(self, now_wall):
         """Return True when a segment boundary is detected."""
@@ -473,9 +442,8 @@ class WordSegmentAccumulator:
             return False
         duration = self.words[-1]["end"] - self.segment_start
         return (
-            (self.last_vad_prob < 0.3 and duration >= 1.0)
-            or (now_wall - self.last_word_wall_time) > 1.5
-            or duration > 8.0
+            (now_wall - self.last_word_wall_time) > 1.5   # 1.5s silence
+            or duration > 8.0                               # hard cap
         )
 
     def flush(self):
@@ -519,64 +487,59 @@ def _do_translate_segment(en_words, start, end):
 
 @sock.route("/ws/transcribe_kyutai")
 def transcribe_kyutai_ws(ws):
-    """WebSocket endpoint: receive 80ms PCM frames, return EN+VI word results via Kyutai streaming ASR."""
+    """Receive 80ms PCM frames, stream through Kyutai PyTorch STT, translate EN→VI."""
     logger.info("⚡ Kyutai WS connection opened")
     accumulator = WordSegmentAccumulator()
-
-    async def proxy():
-        kyutai_url = f"ws://localhost:{KYUTAI_PORT}/api/asr-streaming"
-        async with _aio_ws.connect(
-            kyutai_url,
-            ping_interval=20,
-            ping_timeout=30,
-            open_timeout=30,
-        ) as kyutai_ws:
-            loop = asyncio.get_running_loop()
-
-            async def forward_in():
-                while True:
-                    data = await loop.run_in_executor(None, ws.receive)
-                    if data is None:
-                        break
-                    payload = json.loads(data)
-                    if payload.get("type") == "END":
-                        break
-                    pcm = np.frombuffer(
-                        base64.b64decode(payload["pcm_base64"]), dtype=np.float32
-                    )
-                    packed = msgpack.packb(
-                        {"type": "Audio", "pcm": pcm.tolist()},
-                        use_single_float=True,
-                    )
-                    await kyutai_ws.send(packed)
-                # Close kyutai_ws to unblock forward_out's async-for
-                await kyutai_ws.close()
-
-            async def forward_out():
-                # ws.send() called from asyncio thread; ws.receive() in executor thread.
-                # Flask-sock's full-duplex socket handles simultaneous read/write safely.
-                async for raw in kyutai_ws:
-                    try:
-                        msg = msgpack.unpackb(raw, raw=False)
-                        now = time.time()
-                        accumulator.add(msg, now)
-                        if accumulator.should_flush(now):
-                            en_words, start, end = accumulator.flush()
-                            result_json = await loop.run_in_executor(
-                                None, _do_translate_segment, en_words, start, end
-                            )
-                            ws.send(result_json)
-                    except Exception as e:
-                        logger.warning(f"Failed to parse/process Kyutai message: {e!r}")
-
-            await asyncio.gather(forward_in(), forward_out())
+    frame_idx = 0
+    all_text_tokens = []
+    prev_decoded = ""
 
     try:
-        asyncio.run(proxy())
+        with torch.no_grad(), kyutai_mimi.streaming(1), kyutai_lm.streaming(1):
+            while True:
+                data = ws.receive()
+                if data is None:
+                    break
+                payload = json.loads(data)
+                if payload.get("type") == "END":
+                    break
+
+                # Decode base64 PCM → [1, 1, frame_size] tensor
+                pcm = np.frombuffer(
+                    base64.b64decode(payload["pcm_base64"]), dtype=np.float32
+                )
+                audio_chunk = torch.from_numpy(pcm).to(kyutai_device)[None, None]
+
+                # One streaming step: audio → text token
+                audio_tokens = kyutai_mimi.encode(audio_chunk)
+                text_tokens  = kyutai_lm.step(audio_tokens)
+
+                if text_tokens is not None:
+                    token_id = int(text_tokens[0, 0, 0].item())
+                    if token_id > 0:  # filter padding tokens
+                        all_text_tokens.append(token_id)
+                        current_decoded = kyutai_text_tokenizer.decode(all_text_tokens)
+                        new_text = current_decoded[len(prev_decoded):]
+
+                        # Space after a token = previous word is complete
+                        if " " in new_text:
+                            parts = new_text.split(" ")
+                            for word_str in parts[:-1]:
+                                word_str = word_str.strip()
+                                if word_str:
+                                    timestamp = frame_idx * 0.08
+                                    now = time.time()
+                                    accumulator.add_word(word_str, timestamp, now)
+                                    if accumulator.should_flush(now):
+                                        en_words, start, end = accumulator.flush()
+                                        ws.send(_do_translate_segment(en_words, start, end))
+                            prev_decoded = current_decoded.rsplit(" ", 1)[0] + " "
+
+                frame_idx += 1
+
     except Exception as e:
-        logger.error(f"Kyutai proxy error: {e}")
+        logger.error(f"Kyutai stream error: {e}")
     finally:
-        # Flush any remaining words after stream ends
         if accumulator.has_words:
             en_words, start, end = accumulator.flush()
             try:
