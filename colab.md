@@ -37,24 +37,6 @@ public_url = tunnel.public_url  # plain URL string
 print(f"🌐 Tunnel: {public_url}")
 
 # ============================================
-# CELL 2b: Load Kyutai STT Model (PyTorch)
-# ============================================
-from moshi.models.loaders import CheckpointInfo
-
-logger.info("🔄 Loading Kyutai stt-1b-en_fr (PyTorch)...")
-kyutai_device = "cuda" if torch.cuda.is_available() else "cpu"
-
-_kyutai_ci = CheckpointInfo.from_hf_repo("kyutai/stt-1b-en_fr")
-kyutai_mimi = _kyutai_ci.get_mimi(device=kyutai_device)
-kyutai_lm   = _kyutai_ci.get_lm_gen(device=kyutai_device)
-kyutai_text_tokenizer = _kyutai_ci.text_tokenizer  # SentencePiece tokenizer
-
-kyutai_mimi.eval()
-kyutai_lm.eval()
-
-logger.info(f"✅ Kyutai STT loaded on {kyutai_device}! frame_size={kyutai_mimi.frame_size}")
-
-# ============================================
 # CELL 3: Load Models
 # ============================================
 from google.colab import userdata  # ← thêm dòng này
@@ -161,6 +143,24 @@ mt_vi2en_model = AutoModelForSeq2SeqLM.from_pretrained(
 )
 mt_vi2en_model.to(mt_device)
 logger.info("✅ MT VI→EN model loaded!")
+
+# ============================================
+# CELL 3b: Load Kyutai STT Model (PyTorch)
+# ============================================
+from moshi.models.loaders import CheckpointInfo
+
+logger.info("🔄 Loading Kyutai stt-1b-en_fr (PyTorch)...")
+kyutai_device = "cuda" if torch.cuda.is_available() else "cpu"
+
+_kyutai_ci = CheckpointInfo.from_hf_repo("kyutai/stt-1b-en_fr")
+kyutai_mimi = _kyutai_ci.get_mimi(device=kyutai_device)
+kyutai_lm   = _kyutai_ci.get_lm_gen(device=kyutai_device)
+kyutai_text_tokenizer = _kyutai_ci.text_tokenizer  # SentencePiece tokenizer
+
+kyutai_mimi.eval()
+kyutai_lm.eval()
+
+logger.info(f"✅ Kyutai STT loaded on {kyutai_device}! frame_size={kyutai_mimi.frame_size}")
 
 # ============================================
 # CELL 4: Helper Functions
