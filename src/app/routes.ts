@@ -7,6 +7,8 @@ import { NotFound } from "./pages/NotFound";
 import { SignInPage } from "./pages/SignInPage";
 import { SignUpPage } from "./pages/SignUpPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { AuthCallbackPage } from "./pages/AuthCallbackPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { UpgradePage } from "./pages/UpgradePage";
 import { UpgradeSuccessPage } from "./pages/UpgradeSuccessPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -34,4 +36,6 @@ export const router = createBrowserRouter([
   { path: "/signin", Component: SignInPage },
   { path: "/signup", Component: SignUpPage },
   { path: "/forgot-password", Component: ForgotPasswordPage },
+  { path: "/auth/callback", Component: AuthCallbackPage },
+  { path: "/reset-password", Component: ResetPasswordPage },
 ]);

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Captions, ArrowLeft, Mail, CheckCircle2, ArrowRight, RefreshCw } from "lucide-react";
 import { AuthRightPanel } from "../components/AuthRightPanel";
 import { useUiPreferences } from "../context/UiPreferencesContext";
+import { supabase } from "../../lib/supabase";
 
 type Stage = "form" | "sent";
 
@@ -28,8 +29,13 @@ export function ForgotPasswordPage() {
     if (err) { setEmailError(err); return; }
     setEmailError("");
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1200));
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     setIsLoading(false);
+    if (error) {
+      setEmailError(error.message);
+      return;
+    }
     setStage("sent");
     startCountdown();
   };
@@ -47,7 +53,8 @@ export function ForgotPasswordPage() {
   const handleResend = async () => {
     if (countdown > 0) return;
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     setIsLoading(false);
     startCountdown();
   };
