@@ -131,11 +131,18 @@ export interface StreamErrorEvent {
   message: string;
 }
 
+export interface StreamSegmentErrorEvent {
+  type: "segment_error";
+  time_range: [number, number];  // [start_seconds, end_seconds]
+  message: string;
+}
+
 export type RealtimeStreamEvent =
   | StreamSegmentEvent
   | StreamSnapshotEvent
   | StreamDoneEvent
-  | StreamErrorEvent;
+  | StreamErrorEvent
+  | StreamSegmentErrorEvent;
 
 export type ExportResolution = "360p" | "720p" | "1080p";
 export type SubtitleLang = "en" | "vi";
