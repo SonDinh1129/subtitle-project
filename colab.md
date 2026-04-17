@@ -51,8 +51,8 @@ KYUTAI_PORT = 7860
 rust_proc = subprocess.Popen(
     ["/content/moshi_server", "--port", str(KYUTAI_PORT),
      "--model", "kyutai/stt-1b-en_fr"],
-    stdout=subprocess.PIPE,
-    stderr=subprocess.DEVNULL,   # avoid pipe deadlock
+    stdout=subprocess.DEVNULL,   # avoid pipe buffer deadlock
+    stderr=subprocess.DEVNULL,
 )
 
 def wait_for_kyutai(port, timeout=120):

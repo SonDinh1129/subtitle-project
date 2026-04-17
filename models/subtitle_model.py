@@ -305,10 +305,11 @@ class AudioStreamProducer:
                     time.sleep(sleep_for)
         finally:
             proc.stdout.close()
-            proc.kill()    # ensure FFmpeg exits immediately
+            if proc.poll() is None:  # only kill if still running
+                proc.kill()
             proc.wait()
 
-        if proc.returncode != 0:
+        if proc.returncode not in (0, -9):
             raise RuntimeError(
                 f"FFmpeg exited with code {proc.returncode} for {self.video_path}"
             )
@@ -383,7 +384,7 @@ class KyutaiStreamClient:
                     )
                     await asyncio.sleep(delay)
                     retry_count += 1
-            if retry_count > self.MAX_RETRIES:
+            if retry_count >= self.MAX_RETRIES:
                 result_queue.put(RuntimeError(
                     f"Kyutai WS failed after {self.MAX_RETRIES} retries"
                 ))
