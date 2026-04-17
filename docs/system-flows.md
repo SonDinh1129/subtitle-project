@@ -20,9 +20,10 @@ Tất cả biểu đồ dưới đây viết bằng cú pháp Mermaid. Copy vào
 12. [UC-29: Xem thông tin tài khoản](#uc-29-xem-thông-tin-tài-khoản)
 13. [UC-30: Đăng xuất](#uc-30-đăng-xuất)
 14. [UC-31/36: Nâng cấp Premium (PayOS)](#uc-3136-nâng-cấp-premium-payos)
-15. [UC-37: Colab xử lý ASR + MT (Normal)](#uc-37-colab-xử-lý-asr--mt)
-16. [UC-38: Colab Stream Realtime](#uc-38-colab-stream-realtime)
-17. [UC-39: Health Check](#uc-39-health-check)
+15. [UC-37: Colab VM2 xử lý ASR + MT (Normal)](#uc-37-colab-vm2-xử-lý-asr--mt-normal-mode)
+16. [UC-38: Colab VM1 — EN Realtime WebSocket (Kyutai)](#uc-38-colab-vm1--en-realtime-websocket-kyutai)
+17. [UC-39: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-39-colab-vm2--vi-realtime-websocket-phowhisper)
+18. [UC-40: Health Check](#uc-40-health-check)
 
 ---
 
@@ -179,9 +180,9 @@ sequenceDiagram
     participant Model as Model (Pipeline)
     participant FFmpeg as FFmpeg (Local)
     participant VAD as Silero VAD (Local)
-    participant Colab as Colab (Whisper + VinAI)
+    participant VM2 as Colab VM2 — COLAB_URL
 
-    User->>FE: Chọn file video + Normal mode
+    User->>FE: Chọn file video + Normal mode + source_lang (en/vi)
     FE->>FE: Validate file type, hiển thị preview
 
     FE->>Flask: POST /api/upload (FormData + JWT)
@@ -191,7 +192,7 @@ sequenceDiagram
         Flask-->>FE: 403 { error: "Monthly limit reached" }
         FE-->>User: Hiển thị thông báo + gợi ý upgrade
     else Còn quota
-        Flask->>Model: create_job(filename, user_id)
+        Flask->>Model: create_job(filename, user_id, source_lang)
         Flask->>Model: Lưu file video vào uploads/
         Flask->>Model: increment_video_count (Supabase RPC)
 
@@ -213,9 +214,9 @@ sequenceDiagram
 
             Model->>Model: update_job(status: "transcribing", progress: 40)
             Model->>Model: encode_segments_for_colab (base64)
-            Model->>Colab: POST /transcribe_translate { segments, mode }
-            Colab->>Colab: Whisper ASR (EN) + VinAI MT (EN→VI)
-            Colab-->>Model: { english_words, vietnamese_words, texts }
+            Model->>VM2: POST /transcribe_translate { segments, mode, source_lang }
+            VM2->>VM2: Faster-Whisper/PhoWhisper ASR + VinAI MT (nếu EN)
+            VM2-->>Model: { english_words, vietnamese_words, texts }
 
             Model->>Model: update_job(status: "generating", progress: 80)
             Model->>Model: words_to_srt_string → save SRT files
@@ -278,15 +279,15 @@ sequenceDiagram
     participant FE as Frontend (Upload → Editor)
     participant Flask as Flask Controller
     participant Model as Model (Pipeline)
-    participant FFmpeg as FFmpeg
-    participant VAD as Silero VAD
-    participant Colab as Colab (Whisper + VinAI)
+    participant FFmpeg as FFmpeg (inline stream)
+    participant VM1 as Colab VM1 — Kyutai (EN)
+    participant VM2 as Colab VM2 — PhoWhisper (VI)
 
-    User->>FE: Chọn file video + Realtime mode (Premium)
-    FE->>Flask: POST /api/upload (mode="realtime" + JWT)
+    User->>FE: Chọn file video + Realtime mode + source_lang (en/vi) [Premium]
+    FE->>Flask: POST /api/upload (mode="realtime", source_lang + JWT)
     Flask->>Flask: require_auth → check is_premium = true
-    Flask->>Model: create_job(user_id), save file
-    Flask->>Model: Start thread: run_pipeline_realtime()
+    Flask->>Model: create_job(user_id, source_lang), save file
+    Flask->>Model: Start thread: run_pipeline_realtime(job_id, colab_url, colab_realtime_url)
     Flask-->>FE: 200 { job_id, status: "queued" }
 
     FE->>FE: Lưu sessionStorage, navigate("/editor?mode=realtime")
@@ -294,41 +295,50 @@ sequenceDiagram
 
     FE->>Flask: GET /api/jobs/{id}/stream?token=JWT (EventSource)
     Flask-->>FE: SSE stream opened
-
     Flask-->>FE: event: { type: "snapshot", status, progress, words }
 
-    par Pipeline background
-        Model->>FFmpeg: Extract audio (progress: 5%)
-        FFmpeg-->>Model: audio.wav
-        Model->>VAD: VAD detection (progress: 20%)
-        VAD-->>Model: segments
-        Model->>Model: split + merge segments
-        Model->>Model: encode_segments_for_colab
+    par Pipeline chạy trong background thread
+        Model->>Model: update_job(status: "transcribing", progress: 10)
 
-        Model->>Colab: POST /transcribe_translate_stream (SSE)
-
-        loop Mỗi segment từ Colab
-            Colab->>Colab: ASR segment N → translate
-            Colab-->>Model: SSE event: { index, english_words, vietnamese_words }
-            alt Segment có speech
-                Model->>Model: Append words, update_job(progress: 30-90%)
-                Model->>Model: emit_job_event({ type: "segment", index, words })
-                Flask-->>FE: SSE event: { type: "segment", index, total, words }
-                FE->>FE: Append subtitle vào editor
-                FE-->>User: Subtitle mới xuất hiện trên màn hình
-            else Segment không có speech (skipped)
-                Colab-->>Model: { index, english_words: [], skipped: true }
-                Model->>Model: emit_job_event (skipped)
-                Flask-->>FE: SSE event: { skipped: true }
-                FE->>FE: Bỏ qua, chỉ cập nhật progress
+        alt source_lang == "en"
+            Model->>Model: AudioStreamProducer(video, 24kHz, 80ms/frame)
+            Model->>VM1: WebSocket connect wss://vm1/ws/transcribe_kyutai
+            loop Mỗi 80ms frame
+                Model->>VM1: send { pcm_base64, frame_index }
+                VM1->>VM1: Kyutai stt-1b-en_fr: decode token
+                alt Từ mới xuất hiện
+                    VM1->>VM1: Accumulate words → flush khi pause > 1.5s hoặc > 8s
+                    VM1->>VM1: VinAI EN→VI translate segment
+                    VM1-->>Model: WS response { english_words, vietnamese_words, english_text, vietnamese_text }
+                end
             end
+            Model->>VM1: send { type: "END" }
+        else source_lang == "vi"
+            Model->>Model: AudioStreamProducer(video, 16kHz, 32ms/frame)
+            Model->>VM2: WebSocket connect wss://vm2/ws/transcribe_vi_realtime
+            loop Mỗi 32ms frame
+                Model->>VM2: send { pcm_base64, frame_index }
+                VM2->>VM2: Silero VAD detect speech
+                alt Speech segment detected
+                    VM2->>VM2: PhoWhisper-large transcribe VI
+                    VM2-->>Model: WS response { vietnamese_words, vietnamese_text }
+                end
+            end
+            Model->>VM2: send { type: "END" }
         end
 
-        Colab-->>Model: data: [DONE]
+        loop Mỗi segment nhận từ WS
+            Model->>Model: Append words, update_job(progress: 10-90%)
+            Model->>Model: emit_job_event({ type: "segment", index, words })
+            Flask-->>FE: SSE event: { type: "segment", index, progress, english_words, vietnamese_words }
+            FE->>FE: Append subtitle vào editor
+            FE-->>User: Subtitle mới xuất hiện trên màn hình
+        end
+
         Model->>Model: Generate SRT files (progress: 90%)
         Model->>Model: update_job(status: "done", progress: 100%)
         Model->>Model: emit_job_event({ type: "done" })
-        Model->>Model: cleanup: xóa audio, xóa queue
+        Model->>Model: cleanup video file
     end
 
     Flask-->>FE: SSE event: { type: "done", progress: 100 }
@@ -562,99 +572,132 @@ sequenceDiagram
 
 ---
 
-## UC-37: Colab xử lý ASR + MT
+## UC-37: Colab VM2 xử lý ASR + MT (Normal Mode)
 
 ```mermaid
 sequenceDiagram
     participant Flask as Flask Backend
-    participant Colab as Colab Server (ngrok)
-    participant Whisper as Whisper large-v3
+    participant VM2 as Colab VM2 — COLAB_URL (ngrok)
+    participant Whisper as Faster-Whisper large-v3
+    participant PhoW as PhoWhisper-large (VI)
     participant VinAI as VinAI Translate EN→VI
 
-    Flask->>Colab: POST /transcribe_translate { segments: [{audio_base64, start, end}], mode }
+    Flask->>VM2: POST /transcribe_translate { segments: [{audio_base64, start, end}], mode, source_lang }
 
     loop Mỗi segment
-        Colab->>Colab: base64 decode → float32 audio array
-        Colab->>Whisper: transcribe(audio, lang="en", word_timestamps=True)
-        Whisper-->>Colab: segments_gen → words [{word, start, end}]
-        Colab->>Colab: Filter: is_valid_word() → loại bỏ ký tự không hợp lệ
-        Colab->>Colab: add_punctuation_simple() → thêm dấu câu cơ bản
-    end
-
-    alt translation_mode === "segment"
-        loop Mỗi segment text
-            Colab->>VinAI: translate_en2vi_batch([segment_text])
-            VinAI-->>Colab: [vietnamese_text]
-            Colab->>Colab: align_translation_to_words() → phân bổ timestamp tỉ lệ
+        VM2->>VM2: base64 decode → float32 audio array
+        alt source_lang == "en"
+            VM2->>Whisper: transcribe(audio, lang="en", word_timestamps=True)
+            Whisper-->>VM2: words [{word, start, end}]
+            VM2->>VM2: is_valid_word() → lọc ký tự không hợp lệ
+            VM2->>VM2: add_punctuation_simple()
+        else source_lang == "vi"
+            VM2->>PhoW: transcribe(audio, lang="vi", word_timestamps=True)
+            PhoW-->>VM2: words [{word, start, end}]
         end
-    else translation_mode === "sentence"
-        Colab->>Colab: Gộp tất cả segments thành 1 đoạn
-        Colab->>VinAI: translate_en2vi_batch([full_english_text])
-        VinAI-->>Colab: [full_vietnamese_text]
-        Colab->>Colab: align_translation_to_words() → timestamp gần đúng
     end
 
-    Colab->>Colab: gc.collect() → giải phóng GPU memory
+    alt source_lang == "en" AND translation_mode == "segment"
+        loop Mỗi segment text
+            VM2->>VinAI: translate_en2vi_batch([segment_text])
+            VinAI-->>VM2: [vietnamese_text]
+            VM2->>VM2: align_translation_to_words()
+        end
+    else source_lang == "en" AND translation_mode == "sentence"
+        VM2->>VinAI: translate_en2vi_batch([full_english_text])
+        VinAI-->>VM2: [full_vietnamese_text]
+        VM2->>VM2: align_translation_to_words()
+    end
 
-    Colab-->>Flask: 200 { english_words, vietnamese_words, english_text, vietnamese_text }
+    VM2->>VM2: gc.collect() → giải phóng GPU memory
+    VM2-->>Flask: 200 { english_words, vietnamese_words, english_text, vietnamese_text }
 ```
 
 ---
 
-## UC-38: Colab Stream Realtime
+## UC-38: Colab VM1 — EN Realtime WebSocket (Kyutai)
 
 ```mermaid
 sequenceDiagram
-    participant Flask as Flask Backend
-    participant Colab as Colab Server (ngrok)
-    participant Whisper as Whisper large-v3
-    participant VinAI as VinAI Translate
+    participant Model as Flask Model Thread
+    participant VM1 as Colab VM1 — COLAB_REALTIME_URL (ngrok)
+    participant Kyutai as Kyutai stt-1b-en_fr
+    participant VinAI as VinAI Translate EN→VI
 
-    Flask->>Colab: POST /transcribe_translate_stream { segments, mode } (SSE)
-    Colab-->>Flask: SSE stream opened
+    Model->>VM1: WebSocket connect wss://vm1/ws/transcribe_kyutai
+    Note over Model,VM1: 80ms frames, 24kHz, float32 PCM
 
-    loop Mỗi segment (idx = 0 → total-1)
-        Colab->>Colab: base64 decode audio
-        Colab->>Whisper: transcribe(audio, lang="en", word_timestamps=True)
-        Whisper-->>Colab: words
-
-        alt Segment có speech
-            Colab->>Colab: add_punctuation_simple()
-            Colab->>VinAI: translate_en2vi_batch([segment_text])
-            VinAI-->>Colab: vietnamese_text
-            Colab->>Colab: align_translation_to_words()
-            Colab-->>Flask: data: { index, total, english_words, vietnamese_words }
-        else Segment không có speech
-            Colab-->>Flask: data: { index, total, english_words: [], skipped: true }
+    loop Mỗi 80ms frame từ AudioStreamProducer
+        Model->>VM1: send { pcm_base64, frame_index }
+        VM1->>Kyutai: mimi.encode(audio_chunk) → audio_tokens
+        VM1->>Kyutai: lm.step(audio_tokens) → text_token
+        alt text_token > 0 (có nội dung)
+            VM1->>VM1: decode token → detect word boundary
+            alt Accumulated words → flush (pause > 1.5s hoặc duration > 8s)
+                VM1->>VinAI: translate_en2vi_batch([en_text])
+                VinAI-->>VM1: vietnamese_text
+                VM1->>VM1: align_translation_to_words()
+                VM1-->>Model: { english_words, vietnamese_words, english_text, vietnamese_text, start, end }
+            end
         end
-
-        Colab->>Colab: gc.collect()
     end
 
-    Colab-->>Flask: data: [DONE]
-    Note over Flask: Stream kết thúc
+    Model->>VM1: send { type: "END" }
+    alt Còn words chưa flush
+        VM1->>VinAI: translate final segment
+        VM1-->>Model: final segment result
+    end
+    Note over VM1: Connection closed
 ```
 
 ---
 
-## UC-39: Health Check
+## UC-39: Colab VM2 — VI Realtime WebSocket (PhoWhisper)
+
+```mermaid
+sequenceDiagram
+    participant Model as Flask Model Thread
+    participant VM2 as Colab VM2 — COLAB_URL (ngrok)
+    participant VAD as Silero VAD
+    participant PhoW as PhoWhisper-large
+
+    Model->>VM2: WebSocket connect wss://vm2/ws/transcribe_vi_realtime
+    Note over Model,VM2: 32ms frames, 16kHz, float32 PCM
+
+    loop Mỗi 32ms frame từ AudioStreamProducer
+        Model->>VM2: send { pcm_base64, frame_index }
+        VM2->>VAD: detect speech activity
+        alt Speech segment kết thúc (silence detected)
+            VM2->>PhoW: transcribe(speech_audio, lang="vi", word_timestamps=True)
+            PhoW-->>VM2: vietnamese_words [{word, start, end}]
+            VM2-->>Model: { vietnamese_words, vietnamese_text, start, end }
+        end
+    end
+
+    Model->>VM2: send { type: "END" }
+    Note over VM2: Connection closed
+```
+
+---
+
+## UC-40: Health Check
 
 ```mermaid
 sequenceDiagram
     participant FE as Frontend
     participant Flask as Flask Backend
     participant VAD as Silero VAD (Local)
-    participant Colab as Colab Server (ngrok)
+    participant VM2 as Colab VM2 — COLAB_URL
 
     FE->>Flask: GET /api/health
     Flask->>VAD: is_vad_ready()
     VAD-->>Flask: true/false
 
-    Flask->>Colab: GET /health (timeout=10s)
-    alt Colab phản hồi
-        Colab-->>Flask: { status: "healthy", asr_model, mt_model, device: "cuda" }
+    Flask->>VM2: GET /health (timeout=10s)
+    alt VM2 phản hồi
+        VM2-->>Flask: { status: "healthy", asr_model, asr_model_vi, mt_model, device: "cuda" }
         Flask-->>FE: 200 { status: "ok", vad_loaded: true, colab_ok: true, colab_info }
-    else Colab không phản hồi
+    else VM2 không phản hồi
         Flask-->>FE: 200 { status: "ok", vad_loaded: true, colab_ok: false, colab_info: { error } }
     end
 ```
@@ -684,7 +727,8 @@ flowchart TB
     subgraph External ["External Systems"]
         SB[(Supabase<br/>Auth + DB)]
         PayOS[PayOS<br/>Payment Gateway]
-        Colab[Google Colab<br/>Whisper + VinAI]
+        ColabVM2[Colab VM2 — COLAB_URL<br/>Faster-Whisper + PhoWhisper + VinAI<br/>HTTP /transcribe_translate<br/>WS /ws/transcribe_vi_realtime]
+        ColabVM1[Colab VM1 — COLAB_REALTIME_URL<br/>Kyutai stt-1b-en_fr + VinAI<br/>WS /ws/transcribe_kyutai]
         FF[FFmpeg<br/>Local]
         VAD[Silero VAD<br/>Local]
     end
@@ -703,7 +747,9 @@ flowchart TB
     SC --> SM
     SM --> FF
     SM --> VAD
-    SM -->|ASR + MT| Colab
+    SM -->|Normal: POST /transcribe_translate| ColabVM2
+    SM -->|EN Realtime: WS /ws/transcribe_kyutai| ColabVM1
+    SM -->|VI Realtime: WS /ws/transcribe_vi_realtime| ColabVM2
     SM --> UPL
     SM --> OUT
     SM --> JOBS
@@ -750,6 +796,7 @@ flowchart TB
 | UC-29 | Xem tài khoản | Free/Premium User, Flask, Supabase |
 | UC-30 | Đăng xuất | Free/Premium User, Supabase |
 | UC-31/36 | Nâng cấp Premium | Free User, Flask, PayOS, Supabase |
-| UC-37 | Colab ASR+MT | Flask, Colab, Whisper, VinAI |
-| UC-38 | Colab Realtime | Flask, Colab, Whisper, VinAI |
-| UC-39 | Health Check | Flask, Colab, VAD |
+| UC-37 | Colab VM2 — Normal ASR+MT | Flask, VM2, Faster-Whisper/PhoWhisper, VinAI |
+| UC-38 | Colab VM1 — EN Realtime WS | Flask, VM1, Kyutai stt-1b-en_fr, VinAI |
+| UC-39 | Colab VM2 — VI Realtime WS | Flask, VM2, Silero VAD, PhoWhisper-large |
+| UC-40 | Health Check | Flask, VM2, Silero VAD |

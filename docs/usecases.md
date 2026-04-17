@@ -2,14 +2,15 @@
 
 ## UC-00: Tổng quan hệ thống
 
-**Mô tả:** SubAI là ứng dụng tạo phụ đề tự động cho video. Người dùng upload video tiếng Anh, hệ thống nhận dạng giọng nói (ASR) bằng Whisper, dịch sang tiếng Việt (MT) bằng VinAI Translate, và tạo file phụ đề SRT với timestamp chính xác. Hệ thống hỗ trợ 2 chế độ xử lý: Normal (xử lý toàn bộ rồi trả kết quả) và Realtime (stream từng segment ngay khi xong — chỉ dành cho Premium). Người dùng có thể chỉnh sửa phụ đề trong editor tích hợp, tải file SRT, hoặc export video đã burn subtitle. Hệ thống phân biệt Free (5 video/tháng, không có realtime) và Premium (trả 99.000đ một lần, dùng mãi, unlimited + realtime).
+**Mô tả:** SubAI là ứng dụng tạo phụ đề tự động cho video. Người dùng upload video (tiếng Anh hoặc tiếng Việt), hệ thống nhận dạng giọng nói (ASR) và dịch sang ngôn ngữ đích, tạo file phụ đề SRT với timestamp chính xác. Hệ thống hỗ trợ 2 chế độ xử lý: Normal (batch qua HTTP) và Realtime (stream frame-by-frame qua WebSocket — chỉ dành cho Premium). Sử dụng 2 Colab VM: VM2 (Faster-Whisper + VinAI, normal mode + VI realtime) và VM1 (Kyutai stt-1b-en_fr + VinAI, EN realtime). Người dùng có thể chỉnh sửa phụ đề trong editor tích hợp, tải file SRT, hoặc export video đã burn subtitle. Hệ thống phân biệt Free (5 video/tháng, không có realtime) và Premium (trả 99.000đ một lần, dùng mãi, unlimited + realtime).
 
 **Actors:**
 - **Guest** — chưa đăng nhập, chỉ xem landing page và đăng ký/đăng nhập
 - **Free User** — đã đăng nhập, giới hạn 5 video/tháng, không có realtime
 - **Premium User** — đã nâng cấp, unlimited video + realtime mode
 - **PayOS** — hệ thống thanh toán bên ngoài, gửi webhook xác nhận
-- **Colab Server** — hệ thống AI bên ngoài (Whisper + VinAI), xử lý ASR + MT
+- **Colab VM2 (COLAB_URL)** — batch ASR+MT (Faster-Whisper + VinAI) + VI realtime (Silero VAD + PhoWhisper-large), endpoint `/transcribe_translate` và `/ws/transcribe_vi_realtime`
+- **Colab VM1 (COLAB_REALTIME_URL)** — EN realtime (Kyutai stt-1b-en_fr + VinAI EN→VI), endpoint `/ws/transcribe_kyutai`
 
 ```
 Guest → Đăng ký/Đăng nhập → Free User
@@ -57,10 +58,10 @@ Guest → Đăng ký/Đăng nhập → Free User
 
 | # | Use Case | Mô tả |
 |---|----------|-------|
-| UC-12 | Upload video | Kéo thả hoặc chọn file video (MP4/MOV/MKV/AVI/WEBM, max 2GB) |
-| UC-13 | Chọn chế độ xử lý Normal | Xử lý toàn bộ video rồi trả kết quả một lần |
+| UC-12 | Upload video | Kéo thả hoặc chọn file video (MP4/MOV/MKV/AVI/WEBM, max 2GB), chọn source_lang (en/vi) |
+| UC-13 | Chọn chế độ xử lý Normal | Batch qua HTTP: Flask → Colab VM2 POST `/transcribe_translate` → trả kết quả một lần |
 | UC-14 | Bị chặn chế độ Realtime | Thấy lock icon + badge "Premium", không thể chọn |
-| UC-15 | Xem tiến trình xử lý | Progress bar: extracting → VAD → transcribing → generating → done |
+| UC-15 | Xem tiến trình xử lý | Progress bar: extracting → transcribing → generating → done |
 | UC-16 | Upload bị giới hạn | Upload > 5 video/tháng → hiển thị thông báo "limit reached" + gợi ý upgrade |
 
 ### Editor
@@ -99,8 +100,8 @@ Guest → Đăng ký/Đăng nhập → Free User
 
 | # | Use Case | Mô tả |
 |---|----------|-------|
-| UC-32 | Chọn chế độ Realtime | Chọn realtime → upload → nhận subtitle từng segment qua SSE stream |
-| UC-33 | Xem subtitle realtime | Subtitle hiện dần trong editor khi Colab xử lý từng segment |
+| UC-32 | Chọn chế độ Realtime | Chọn realtime + source_lang → upload → redirect ngay sang Editor |
+| UC-33 | Xem subtitle realtime | Subtitle hiện dần qua SSE; backend stream PCM frames tới Colab WebSocket (EN: VM1 `/ws/transcribe_kyutai` 80ms/24kHz, VI: VM2 `/ws/transcribe_vi_realtime` 32ms/16kHz) |
 | UC-34 | Upload không giới hạn | Không bị chặn sau 5 video/tháng |
 | UC-35 | Xem badge Premium | Crown icon trên Header, badge trên profile |
 
@@ -116,10 +117,17 @@ Guest → Đăng ký/Đăng nhập → Free User
 
 ---
 
-## Actor: Colab Server (hệ thống bên ngoài)
+## Actor: Colab VM2 — COLAB_URL (hệ thống bên ngoài)
 
 | # | Use Case | Mô tả |
 |---|----------|-------|
-| UC-37 | Nhận audio segments | Flask gửi base64 audio → Colab xử lý ASR (Whisper) + MT (VinAI) |
-| UC-38 | Stream kết quả realtime | Colab yield từng segment qua SSE → Flask relay → Frontend |
-| UC-39 | Health check | Flask kiểm tra Colab connection qua GET /health |
+| UC-37 | Normal ASR+MT (EN) | Flask gửi base64 audio segments → VM2 Faster-Whisper large-v3 + VinAI EN→VI → trả kết quả |
+| UC-37b | Normal ASR (VI) | Flask gửi base64 audio → VM2 PhoWhisper-large → trả kết quả tiếng Việt |
+| UC-38 | VI Realtime WebSocket | Flask stream 32ms/16kHz PCM frames → VM2 `/ws/transcribe_vi_realtime` (Silero VAD + PhoWhisper-large) → yield segments |
+| UC-39 | Health check | Flask kiểm tra VM2 connection qua GET /health |
+
+## Actor: Colab VM1 — COLAB_REALTIME_URL (hệ thống bên ngoài)
+
+| # | Use Case | Mô tả |
+|---|----------|-------|
+| UC-40 | EN Realtime WebSocket | Flask stream 80ms/24kHz PCM frames → VM1 `/ws/transcribe_kyutai` (Kyutai stt-1b-en_fr + VinAI EN→VI) → yield segments |
