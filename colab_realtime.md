@@ -16,10 +16,13 @@ Endpoint: /ws/transcribe_kyutai
 # CELL 1: Install Dependencies
 # ============================================
 print("📦 Installing dependencies...")
-# moshi installs huggingface-hub 0.x (its constraint).
-# transformers 4.x requires huggingface-hub>=0.21.0 → compatible, no conflict.
+# 1. moshi installs huggingface-hub 0.x + downgrades torch to <2.10 (its constraint)
 !pip install -q moshi
-!pip install -q "transformers>=4.40.0,<5.0.0" torch sentencepiece flask flask-cors pyngrok flask-sock numpy
+# 2. Force-reinstall transformers 4.x to fully overwrite Colab's pre-installed 5.0.0
+#    (partial files from 5.0.0 cause ImportError: cannot import name 'infer_framework')
+!pip install -q --force-reinstall "transformers==4.49.0" "huggingface-hub>=0.24.0,<1.0.0"
+# 3. Other deps (torch already installed by moshi, skip to avoid re-downgrade)
+!pip install -q sentencepiece flask flask-cors pyngrok flask-sock numpy
 print("✅ Dependencies installed!")
 
 # ============================================
