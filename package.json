@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --port 5173",
-    "start": "vite build && python app.py"
+    "start": "vite build && .venv\\Scripts\\python.exe app.py"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

@@ -1,30 +1,45 @@
-"""
-=================================================================
-GOOGLE COLAB REALTIME ASR MICROSERVICE — VM 1 (Kyutai + EN→VI)
-=================================================================
-VRAM budget (T4 16 GB):
-  Kyutai stt-1b-en_fr  ~4 GB
-  VinAI EN→VI          ~2 GB
-  ─────────────────────────
-  Total                ~6 GB  (10 GB headroom for activations)
-
-Endpoint: /ws/transcribe_kyutai
-=================================================================
-"""
-
 # ============================================
-# CELL 1: Install Dependencies
+# CELL 1: Install Dependencies (Fixed)
 # ============================================
 print("📦 Installing dependencies...")
-# 1. moshi installs huggingface-hub 0.x + downgrades torch to <2.10 (its constraint)
+
+# Bước 1: Cài moshi trước
 !pip install -q moshi
-# 2. Nuke Colab's pre-installed transformers 5.x — pip uninstall leaves mixed .pyc
-#    cache files that cause ImportError on mismatched transformers versions
+
+# Bước 2: Gỡ torchvision + torchaudio
+!pip uninstall -y torchvision torchaudio 2>/dev/null || true
+
+# Bước 3: Xóa transformers + sentence-transformers HOÀN TOÀN
+!pip uninstall -y transformers sentence-transformers 2>/dev/null || true
 !rm -rf /usr/local/lib/python3.12/dist-packages/transformers
 !rm -rf /usr/local/lib/python3.12/dist-packages/transformers-*.dist-info
-!pip install -q "transformers==4.49.0" "huggingface-hub>=0.24.0,<1.0.0"
-# 3. Other deps (torch already installed by moshi)
-!pip install -q sentencepiece flask flask-cors pyngrok flask-sock numpy
+!rm -rf /usr/local/lib/python3.12/dist-packages/sentence_transformers
+!rm -rf /usr/local/lib/python3.12/dist-packages/sentence_transformers-*.dist-info
+!find /usr/local/lib/python3.12 -name "*.pyc" -path "*/transformers/*" -delete 2>/dev/null || true
+!find /usr/local/lib/python3.12 -name "__pycache__" -path "*/transformers/*" -exec rm -rf {} + 2>/dev/null || true
+
+# Bước 4: FIX CORE - Pin protobuf + sentencepiece để tránh duplicate descriptor
+!pip install -q \
+    "protobuf==3.20.3" \
+    "sentencepiece==0.1.99" \
+    "transformers==4.44.0" \
+    "huggingface-hub>=0.24.0,<1.0.0" \
+    "accelerate>=0.26.0" \
+    flask flask-cors pyngrok flask-sock numpy
+
+# Bước 5: Xóa cache descriptor pool bằng cách restart submodules
+import sys
+
+# Xóa toàn bộ cache liên quan đến sentencepiece và transformers
+mods_to_remove = [k for k in sys.modules if any(
+    x in k for x in ['transformers', 'sentencepiece', 'google.protobuf']
+)]
+for mod in mods_to_remove:
+    del sys.modules[mod]
+
+# Verify
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+print("✅ transformers import OK!")
 print("✅ Dependencies installed!")
 
 # ============================================
@@ -35,8 +50,7 @@ from pyngrok import ngrok
 ngrok.kill()
 PORT = 5000
 
-# ⚠️ THAY BẰNG TOKEN CỦA BẠN
-NGROK_TOKEN = "3CObzFT2HwMQBy49lYxjm89OzJq_7nc5YF9AGkgppvKcfi9bF"
+NGROK_TOKEN = "3Cd6GQUQ0lhT1lPbOdhoqgbETLZ_56zy6mDkVgQ8AWxfawhrQ"
 ngrok.set_auth_token(NGROK_TOKEN)
 tunnel = ngrok.connect(PORT)
 public_url = tunnel.public_url
@@ -46,8 +60,7 @@ print(f"🌐 Realtime Tunnel: {public_url}")
 # CELL 3: Load Models
 # ============================================
 from google.colab import userdata
-import os
-import logging
+import os, logging
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
@@ -61,6 +74,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 mt_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"🖥️ Device: {mt_device} | torch: {torch.__version__}")
 
 # VinAI EN→VI (~2 GB VRAM)
 logger.info("🔄 Loading VinAI Translate EN→VI...")
@@ -71,7 +85,7 @@ logger.info("✅ VinAI EN→VI loaded!")
 # Kyutai stt-1b-en_fr (~4 GB VRAM)
 from moshi.models.loaders import CheckpointInfo
 
-logger.info("🔄 Loading Kyutai stt-1b-en_fr (PyTorch)...")
+logger.info("🔄 Loading Kyutai stt-1b-en_fr...")
 kyutai_device = str(mt_device)
 
 _kyutai_ci = CheckpointInfo.from_hf_repo("kyutai/stt-1b-en_fr")
@@ -81,14 +95,12 @@ kyutai_text_tokenizer = _kyutai_ci.get_text_tokenizer()
 
 kyutai_mimi.eval()
 kyutai_lm.eval()
-logger.info(f"✅ Kyutai STT loaded on {kyutai_device}! frame_size={kyutai_mimi.frame_size}")
+logger.info(f"✅ Kyutai STT loaded! frame_size={kyutai_mimi.frame_size}")
 
 # ============================================
 # CELL 4: Helper Functions
 # ============================================
-import re
 import numpy as np
-
 
 def add_punctuation_simple(text):
     text = text.strip()
@@ -98,12 +110,12 @@ def add_punctuation_simple(text):
         text += '.'
     return text
 
-
 def translate_en2vi_batch(en_texts):
     if not en_texts:
         return []
     input_ids = mt_tokenizer(
-        en_texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
+        en_texts, padding=True, truncation=True,
+        max_length=512, return_tensors="pt"
     ).to(mt_device)
     with torch.no_grad():
         output_ids = mt_model.generate(
@@ -116,13 +128,12 @@ def translate_en2vi_batch(en_texts):
         )
     return mt_tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
-
 def align_translation_to_words(original_words, english_text, vietnamese_text):
     vi_words = vietnamese_text.split()
     if not vi_words or not original_words:
         return []
     total_duration = original_words[-1]["end"] - original_words[0]["start"]
-    time_per_word = total_duration / len(vi_words)
+    time_per_word = total_duration / max(len(vi_words), 1)
     current_time = original_words[0]["start"]
     result = []
     for vi_word in vi_words:
@@ -134,21 +145,17 @@ def align_translation_to_words(original_words, english_text, vietnamese_text):
         current_time += time_per_word
     return result
 
-
 # ============================================
-# CELL 5: Flask API — /ws/transcribe_kyutai
+# CELL 5: Flask API
 # ============================================
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_sock import Sock
-import base64
-import json
-import time
+import base64, json, time
 
 app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
-
 
 class WordSegmentAccumulator:
     def __init__(self):
@@ -184,7 +191,6 @@ class WordSegmentAccumulator:
     def has_words(self):
         return bool(self.words)
 
-
 def _do_translate_segment(en_words, start, end):
     try:
         en_text = add_punctuation_simple(" ".join(w["word"] for w in en_words))
@@ -206,10 +212,8 @@ def _do_translate_segment(en_words, start, end):
             "message": str(e),
         })
 
-
 @sock.route("/ws/transcribe_kyutai")
 def transcribe_kyutai_ws(ws):
-    """Receive 80ms PCM frames, run Kyutai STT, translate EN→VI, stream results."""
     logger.info("⚡ Kyutai WS connection opened")
     accumulator = WordSegmentAccumulator()
     frame_idx = 0
@@ -226,9 +230,10 @@ def transcribe_kyutai_ws(ws):
                 if payload.get("type") == "END":
                     break
 
-                pcm = np.frombuffer(base64.b64decode(payload["pcm_base64"]), dtype=np.float32)
+                pcm = np.frombuffer(
+                    base64.b64decode(payload["pcm_base64"]), dtype=np.float32
+                )
                 audio_chunk = torch.from_numpy(pcm).to(kyutai_device)[None, None]
-
                 audio_tokens = kyutai_mimi.encode(audio_chunk)
                 text_tokens  = kyutai_lm.step(audio_tokens)
 
@@ -246,8 +251,8 @@ def transcribe_kyutai_ws(ws):
                                     now = time.time()
                                     accumulator.add_word(word_str, frame_idx * 0.08, now)
                                     if accumulator.should_flush(now):
-                                        en_words, start, end = accumulator.flush()
-                                        ws.send(_do_translate_segment(en_words, start, end))
+                                        en_words, seg_start, seg_end = accumulator.flush()
+                                        ws.send(_do_translate_segment(en_words, seg_start, seg_end))
                             prev_decoded = current_decoded.rsplit(" ", 1)[0] + " "
 
                 frame_idx += 1
@@ -256,35 +261,35 @@ def transcribe_kyutai_ws(ws):
         logger.error(f"Kyutai stream error: {e}")
     finally:
         if accumulator.has_words:
-            en_words, start, end = accumulator.flush()
+            en_words, seg_start, seg_end = accumulator.flush()
             try:
-                ws.send(_do_translate_segment(en_words, start, end))
+                ws.send(_do_translate_segment(en_words, seg_start, seg_end))
             except Exception as e:
                 logger.warning(f"Final flush failed: {e!r}")
         logger.info("⚡ Kyutai WS connection closed")
-
 
 @app.route("/health")
 def health():
     return jsonify({
         "status": "healthy",
         "vm": "realtime",
-        "models": {"asr": "kyutai/stt-1b-en_fr", "mt": "vinai-translate-en2vi-v2"},
+        "models": {
+            "asr": "kyutai/stt-1b-en_fr",
+            "mt": "vinai-translate-en2vi-v2"
+        },
         "device": kyutai_device,
         "ws_endpoint": "/ws/transcribe_kyutai",
     })
 
-
 # ============================================
 # CELL 6: Start Server
 # ============================================
-if __name__ == '__main__':
-    print("\n" + "="*60)
-    print("🚀 Starting Realtime ASR Microservice (VM 1)...")
-    print("="*60)
-    print(f"🌐 Public URL: {public_url}")
-    print(f"\n📋 Set this in your .env:")
-    print(f"   COLAB_REALTIME_URL = '{public_url}'")
-    print("="*60 + "\n")
+print("\n" + "="*60)
+print("🚀 Starting Realtime ASR Microservice (VM 1)...")
+print("="*60)
+print(f"🌐 Public URL : {public_url}")
+print(f"📋 Set trong .env:")
+print(f"   COLAB_REALTIME_URL = '{public_url}'")
+print("="*60 + "\n")
 
-    app.run(port=PORT, debug=False, use_reloader=False, threaded=True)
+app.run(port=PORT, debug=False, use_reloader=False, threaded=True)
