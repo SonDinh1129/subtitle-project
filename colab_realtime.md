@@ -76,8 +76,8 @@ kyutai_device = str(mt_device)
 
 _kyutai_ci = CheckpointInfo.from_hf_repo("kyutai/stt-1b-en_fr")
 kyutai_mimi = _kyutai_ci.get_mimi(device=kyutai_device)
-kyutai_lm   = _kyutai_ci.get_lm_gen(device=kyutai_device)
-kyutai_text_tokenizer = _kyutai_ci.text_tokenizer
+kyutai_lm   = _kyutai_ci.get_moshi(device=kyutai_device)
+kyutai_text_tokenizer = _kyutai_ci.get_text_tokenizer()
 
 kyutai_mimi.eval()
 kyutai_lm.eval()

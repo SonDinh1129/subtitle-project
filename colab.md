@@ -9,12 +9,12 @@ Combines English ASR + English-to-Vietnamese Translation
 # CELL 1: Install Dependencies
 # ============================================
 print("📦 Installing dependencies...")
-!pip install -q "huggingface-hub>=0.24.0,<1.0.0" faster-whisper torch sentencepiece flask flask-cors pyngrok ctranslate2 flask-sock silero-vad
-# Manually nuke Colab's pre-installed transformers 5.x directory before reinstalling
-# pip uninstall leaves mixed .pyc cache → ImportError on mismatched files
+!pip install -q faster-whisper torch sentencepiece flask flask-cors pyngrok flask-sock silero-vad
+# Nuke Colab's partial transformers installation (mixed .pyc cache causes ImportError)
 !rm -rf /usr/local/lib/python3.12/dist-packages/transformers
 !rm -rf /usr/local/lib/python3.12/dist-packages/transformers-*.dist-info
-!pip install -q "transformers==4.49.0"
+# Reinstall transformers — let pip resolve the version compatible with ctranslate2 (via faster-whisper)
+!pip install -q transformers
 print("✅ Dependencies installed!")
 
 # ============================================

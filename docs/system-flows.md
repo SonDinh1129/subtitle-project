@@ -21,9 +21,9 @@ Tất cả biểu đồ dưới đây viết bằng cú pháp Mermaid. Copy vào
 13. [UC-30: Đăng xuất](#uc-30-đăng-xuất)
 14. [UC-31/36: Nâng cấp Premium (PayOS)](#uc-3136-nâng-cấp-premium-payos)
 15. [UC-37: Colab VM2 xử lý ASR + MT (Normal)](#uc-37-colab-vm2-xử-lý-asr--mt-normal-mode)
-16. [UC-38: Colab VM1 — EN Realtime WebSocket (Kyutai)](#uc-38-colab-vm1--en-realtime-websocket-kyutai)
-17. [UC-39: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-39-colab-vm2--vi-realtime-websocket-phowhisper)
-18. [UC-40: Health Check](#uc-40-health-check)
+16. [UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-38-colab-vm2--vi-realtime-websocket-phowhisper)
+17. [UC-39: Health Check](#uc-39-health-check)
+18. [UC-40: Colab VM1 — EN Realtime WebSocket (Kyutai)](#uc-40-colab-vm1--en-realtime-websocket-kyutai)
 
 ---
 
@@ -615,7 +615,68 @@ sequenceDiagram
 
 ---
 
-## UC-38: Colab VM1 — EN Realtime WebSocket (Kyutai)
+## UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)
+
+```mermaid
+sequenceDiagram
+    participant Model as Flask Model Thread
+    participant VM2 as Colab VM2 — COLAB_URL (ngrok)
+    participant VAD as Silero VAD
+    participant PhoW as PhoWhisper-large
+
+    Model->>VM2: WebSocket connect wss://vm2/ws/transcribe_vi_realtime
+    Note over Model,VM2: 32ms frames, 16kHz, float32 PCM
+
+    loop Mỗi 32ms frame từ AudioStreamProducer
+        Model->>VM2: send { pcm_base64, frame_index }
+        VM2->>VAD: detect speech activity
+        alt Speech segment kết thúc (silence detected)
+            VM2->>PhoW: transcribe(speech_audio, lang="vi", word_timestamps=True)
+            PhoW-->>VM2: vietnamese_words [{word, start, end}]
+            VM2-->>Model: { vietnamese_words, vietnamese_text, start, end }
+        end
+    end
+
+    Model->>VM2: send { type: "END" }
+    Note over VM2: Connection closed
+```
+
+---
+
+## UC-39: Health Check
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant Flask as Flask Backend
+    participant VAD as Silero VAD (Local)
+    participant VM2 as Colab VM2 — COLAB_URL
+    participant VM1 as Colab VM1 — COLAB_REALTIME_URL
+
+    FE->>Flask: GET /api/health
+    Flask->>VAD: is_vad_ready()
+    VAD-->>Flask: true/false
+
+    Flask->>VM2: GET /health (timeout=10s)
+    alt VM2 phản hồi
+        VM2-->>Flask: { status: "healthy", asr_model, asr_model_vi, mt_model, device: "cuda" }
+    else VM2 không phản hồi
+        Flask-->>Flask: colab_ok: false
+    end
+
+    Flask->>VM1: GET /health (timeout=10s)
+    alt VM1 phản hồi
+        VM1-->>Flask: { status: "healthy", models: {asr, mt}, device: "cuda" }
+    else VM1 không phản hồi
+        Flask-->>Flask: colab_realtime_ok: false
+    end
+
+    Flask-->>FE: 200 { status: "ok", vad_loaded, colab_ok, colab_realtime_ok, colab_info, colab_realtime_info }
+```
+
+---
+
+## UC-40: Colab VM1 — EN Realtime WebSocket (Kyutai)
 
 ```mermaid
 sequenceDiagram
@@ -648,58 +709,6 @@ sequenceDiagram
         VM1-->>Model: final segment result
     end
     Note over VM1: Connection closed
-```
-
----
-
-## UC-39: Colab VM2 — VI Realtime WebSocket (PhoWhisper)
-
-```mermaid
-sequenceDiagram
-    participant Model as Flask Model Thread
-    participant VM2 as Colab VM2 — COLAB_URL (ngrok)
-    participant VAD as Silero VAD
-    participant PhoW as PhoWhisper-large
-
-    Model->>VM2: WebSocket connect wss://vm2/ws/transcribe_vi_realtime
-    Note over Model,VM2: 32ms frames, 16kHz, float32 PCM
-
-    loop Mỗi 32ms frame từ AudioStreamProducer
-        Model->>VM2: send { pcm_base64, frame_index }
-        VM2->>VAD: detect speech activity
-        alt Speech segment kết thúc (silence detected)
-            VM2->>PhoW: transcribe(speech_audio, lang="vi", word_timestamps=True)
-            PhoW-->>VM2: vietnamese_words [{word, start, end}]
-            VM2-->>Model: { vietnamese_words, vietnamese_text, start, end }
-        end
-    end
-
-    Model->>VM2: send { type: "END" }
-    Note over VM2: Connection closed
-```
-
----
-
-## UC-40: Health Check
-
-```mermaid
-sequenceDiagram
-    participant FE as Frontend
-    participant Flask as Flask Backend
-    participant VAD as Silero VAD (Local)
-    participant VM2 as Colab VM2 — COLAB_URL
-
-    FE->>Flask: GET /api/health
-    Flask->>VAD: is_vad_ready()
-    VAD-->>Flask: true/false
-
-    Flask->>VM2: GET /health (timeout=10s)
-    alt VM2 phản hồi
-        VM2-->>Flask: { status: "healthy", asr_model, asr_model_vi, mt_model, device: "cuda" }
-        Flask-->>FE: 200 { status: "ok", vad_loaded: true, colab_ok: true, colab_info }
-    else VM2 không phản hồi
-        Flask-->>FE: 200 { status: "ok", vad_loaded: true, colab_ok: false, colab_info: { error } }
-    end
 ```
 
 ---
@@ -797,6 +806,6 @@ flowchart TB
 | UC-30 | Đăng xuất | Free/Premium User, Supabase |
 | UC-31/36 | Nâng cấp Premium | Free User, Flask, PayOS, Supabase |
 | UC-37 | Colab VM2 — Normal ASR+MT | Flask, VM2, Faster-Whisper/PhoWhisper, VinAI |
-| UC-38 | Colab VM1 — EN Realtime WS | Flask, VM1, Kyutai stt-1b-en_fr, VinAI |
-| UC-39 | Colab VM2 — VI Realtime WS | Flask, VM2, Silero VAD, PhoWhisper-large |
-| UC-40 | Health Check | Flask, VM2, Silero VAD |
+| UC-38 | Colab VM2 — VI Realtime WS | Flask, VM2, Silero VAD, PhoWhisper-large |
+| UC-39 | Health Check | Flask, VM1, VM2, Silero VAD |
+| UC-40 | Colab VM1 — EN Realtime WS | Flask, VM1, Kyutai stt-1b-en_fr, VinAI |
