@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { useNavigate, Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { uploadVideo, pollUntilDone, STATUS_MESSAGES, type ProcessMode } from "../../lib/api";
+import { supabase } from "../../lib/supabase";
 import { useUiPreferences } from "../context/UiPreferencesContext";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -18,6 +19,7 @@ import {
   Zap,
   Lock,
   Crown,
+  LogIn,
 } from "lucide-react";
 
 const SUPPORTED_FORMATS = ["MP4", "MOV", "MKV", "AVI", "WEBM"];
@@ -48,8 +50,11 @@ function isLikelyVideoFile(file: File): boolean {
 
 export function UploadPage() {
   const { language: appLanguage } = useUiPreferences();
-  const { isPremium, profile } = useAuth();
+  const { isPremium, profile, user, isLoading: authLoading } = useAuth();
   const isVi = appLanguage === "vi";
+  const wasGuestRef = useRef(false);
+  const isDemo = !authLoading && (!user || user.is_anonymous === true);
+  const [demoDone, setDemoDone] = useState(() => localStorage.getItem("demo_done") === "1");
   const [state, setState] = useState<UploadState>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -75,6 +80,17 @@ export function UploadPage() {
       setUploadError(isVi ? "Định dạng tệp không được hỗ trợ. Hãy dùng MP4, MOV, MKV, AVI hoặc WEBM." : "Unsupported file format. Please use MP4, MOV, MKV, AVI, or WEBM.");
       setState("error");
       return;
+    }
+
+    // Auto sign in anonymously for guest/demo users
+    if (!user) {
+      const { error: anonError } = await supabase.auth.signInAnonymously();
+      if (anonError) {
+        setUploadError(isVi ? "Không thể khởi tạo phiên demo. Vui lòng thử lại." : "Could not start demo session. Please try again.");
+        setState("error");
+        return;
+      }
+      wasGuestRef.current = true;
     }
 
     setSelectedFile(file);
@@ -111,6 +127,10 @@ export function UploadPage() {
         // Khi user đến Editor, words đầu tiên đã có sẵn trong queue → sub hiện ngay.
         setState("realtime_warming");
         await new Promise<void>((resolve) => setTimeout(resolve, 2500));
+        if (wasGuestRef.current) {
+          localStorage.setItem("demo_done", "1");
+          setDemoDone(true);
+        }
         navigate(`/editor?mode=realtime&job_id=${encodeURIComponent(jobId)}`);
         return;
       }
@@ -130,6 +150,10 @@ export function UploadPage() {
 
       setProcessingProgress(100);
       setProcessingMsg(isVi ? "Đã tạo phụ đề!" : "Subtitles generated!");
+      if (wasGuestRef.current) {
+        localStorage.setItem("demo_done", "1");
+        setDemoDone(true);
+      }
       setState("done");
 
     } catch (err: unknown) {
@@ -147,7 +171,7 @@ export function UploadPage() {
         setState("error");
       }
     }
-  }, [isVi, navigate, processMode]);
+  }, [isVi, navigate, processMode, user]);
 
   const startProcessing = () => {
     setState("processing");
@@ -243,9 +267,63 @@ export function UploadPage() {
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Main Upload Area */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Demo banner */}
+            {isDemo && !demoDone && (state === "idle" || state === "dragover") && (
+              <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm mb-2">
+                <Zap className="w-4 h-4 shrink-0 text-amber-500" />
+                <span className="flex-1">
+                  {isVi
+                    ? "Đang dùng thử demo · Chỉ Normal mode · 1 video miễn phí"
+                    : "Demo mode · Normal mode only · 1 free video"}
+                </span>
+                <Link to="/signin" className="shrink-0 font-semibold underline underline-offset-2">
+                  {isVi ? "Đăng nhập" : "Sign in"}
+                </Link>
+              </div>
+            )}
+
             {/* Drop Zone */}
             <AnimatePresence mode="wait">
-              {(state === "idle" || state === "dragover" || state === "error") && (
+              {isDemo && demoDone && (
+                <motion.div
+                  key="demo_limit"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-10 shadow-sm flex flex-col items-center text-center gap-5"
+                >
+                  <div className="w-16 h-16 rounded-2xl bg-violet-50 dark:bg-violet-900/30 border border-violet-100 dark:border-violet-700/40 flex items-center justify-center">
+                    <LogIn className="w-7 h-7 text-violet-500" />
+                  </div>
+                  <div>
+                    <p className="text-gray-900 dark:text-gray-100 mb-1.5">
+                      {isVi ? "Bạn đã dùng hết lượt demo" : "Demo limit reached"}
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs">
+                      {isVi
+                        ? "Đăng nhập để upload thêm video. Tài khoản miễn phí được 5 video mỗi tháng."
+                        : "Sign in to upload more videos. Free accounts get 5 videos per month."}
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <Link
+                      to="/signin"
+                      className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl shadow-sm transition-all text-sm"
+                    >
+                      <LogIn className="w-4 h-4" />
+                      {isVi ? "Đăng nhập" : "Sign In"}
+                    </Link>
+                    <Link
+                      to="/signup"
+                      className="flex items-center gap-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 px-5 py-2.5 rounded-xl transition-all text-sm"
+                    >
+                      {isVi ? "Đăng ký miễn phí" : "Sign Up Free"}
+                    </Link>
+                  </div>
+                </motion.div>
+              )}
+
+              {!demoDone && (state === "idle" || state === "dragover" || state === "error") && (
                 <motion.div
                   key="dropzone"
                   initial={{ opacity: 0, scale: 0.98 }}
@@ -590,20 +668,29 @@ export function UploadPage() {
                       <Play className="w-4 h-4" />
                       {isVi ? "Mở trong Editor" : "Open in Editor"}
                     </button>
-                    <button
-                      onClick={handleReset}
-                      className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-200 border border-gray-200 dark:border-gray-700 px-6 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
-                    >
-                      <Upload className="w-4 h-4" />
-                      {isVi ? "Tải video khác" : "Upload Another"}
-                    </button>
+                    {isDemo && demoDone ? (
+                      <Link
+                        to="/signup"
+                        className="flex items-center justify-center gap-2 border border-violet-300 text-violet-700 dark:text-violet-200 dark:border-violet-700 px-6 py-2.5 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-all text-sm"
+                      >
+                        {isVi ? "Đăng ký để upload thêm" : "Sign Up to Upload More"}
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={handleReset}
+                        className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-200 border border-gray-200 dark:border-gray-700 px-6 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+                      >
+                        <Upload className="w-4 h-4" />
+                        {isVi ? "Tải video khác" : "Upload Another"}
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
             {/* Generate Button */}
-            {state === "idle" && (
+            {state === "idle" && !(isDemo && demoDone) && (
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white py-3.5 rounded-xl shadow-md shadow-violet-200 hover:shadow-lg transition-all"

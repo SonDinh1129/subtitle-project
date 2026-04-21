@@ -127,12 +127,13 @@ const steps = [
 const pricingPlans = [
   {
     name: "Free",
-    price: "$0",
+    price: "0₫",
     period: "forever",
     desc: "Perfect for getting started",
     features: [
-      "30 minutes / month",
-      "English subtitle workflow",
+      "5 videos / month",
+      "Normal mode",
+      "English & Vietnamese subtitles",
       "SRT export",
       "Basic subtitle editor",
     ],
@@ -140,36 +141,20 @@ const pricingPlans = [
     featured: false,
   },
   {
-    name: "Pro",
-    price: "$19",
-    period: "per month",
-    desc: "For creators and freelancers",
+    name: "Premium",
+    price: "99.000₫",
+    period: "/ year",
+    desc: "For creators who need more",
     features: [
-      "300 minutes / month",
-      "English subtitle workflow",
+      "Unlimited videos",
+      "Normal + Realtime mode",
+      "English & Vietnamese subtitles",
       "All export formats",
       "Advanced editor",
-      "Realtime mode",
       "Priority processing",
     ],
-    cta: "Start Pro Trial",
+    cta: "Upgrade to Premium",
     featured: true,
-  },
-  {
-    name: "Team",
-    price: "$49",
-    period: "per month",
-    desc: "For agencies and teams",
-    features: [
-      "Unlimited minutes",
-      "English subtitle workflow",
-      "All export formats",
-      "Team collaboration",
-      "API access",
-      "Dedicated support",
-    ],
-    cta: "Start Team Trial",
-    featured: false,
   },
 ];
 
@@ -239,11 +224,12 @@ export function LandingPage() {
         {
           ...pricingPlans[0],
           name: "Miễn phí",
-          period: "trọn đời",
+          period: "mãi mãi",
           desc: "Phù hợp để bắt đầu",
           features: [
-            "30 phút / tháng",
-            "Luồng phụ đề tiếng Anh",
+            "5 video / tháng",
+            "Chế độ Normal",
+            "Phụ đề Anh & Việt",
             "Xuất SRT",
             "Editor cơ bản",
           ],
@@ -251,33 +237,18 @@ export function LandingPage() {
         },
         {
           ...pricingPlans[1],
-          name: "Pro",
-          period: "mỗi tháng",
-          desc: "Dành cho creator và freelancer",
+          name: "Premium",
+          period: "/ năm",
+          desc: "Dành cho creator cần nhiều hơn",
           features: [
-            "300 phút / tháng",
-            "Luồng phụ đề tiếng Anh",
+            "Không giới hạn video",
+            "Normal + Realtime mode",
+            "Phụ đề Anh & Việt",
             "Đầy đủ định dạng xuất",
             "Editor nâng cao",
-            "Chế độ Realtime",
             "Ưu tiên xử lý",
           ],
-          cta: "Dùng thử Pro",
-        },
-        {
-          ...pricingPlans[2],
-          name: "Team",
-          period: "mỗi tháng",
-          desc: "Dành cho agency và team",
-          features: [
-            "Không giới hạn phút",
-            "Luồng phụ đề tiếng Anh",
-            "Đầy đủ định dạng xuất",
-            "Cộng tác nhóm",
-            "API access",
-            "Hỗ trợ riêng",
-          ],
-          cta: "Dùng thử Team",
+          cta: "Nâng cấp Premium",
         },
       ]
     : pricingPlans;
@@ -408,7 +379,7 @@ export function LandingPage() {
                 <ArrowRight className="w-4 h-4" />
               </Link>
               <Link
-                to="/editor"
+                to="/upload"
                 className="flex items-center gap-2 text-gray-700 bg-white border border-gray-200 hover:border-gray-300 px-7 py-3.5 rounded-xl shadow-sm hover:shadow-md transition-all"
               >
                 <Play className="w-4 h-4 text-violet-600" />
@@ -763,7 +734,7 @@ export function LandingPage() {
             <p className="text-gray-500 dark:text-gray-400">{isVi ? "Bắt đầu miễn phí, nâng cấp khi cần." : "Start free, upgrade when you need more."}</p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+          <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
             {localizedPricingPlans.map((plan, i) => (
               <motion.div
                 key={plan.name}
@@ -817,7 +788,7 @@ export function LandingPage() {
                   ))}
                 </ul>
                 <Link
-                  to="/upload"
+                  to={plan.featured ? "/upgrade" : "/upload"}
                   className={`block text-center text-sm py-2.5 rounded-xl transition-all ${
                     plan.featured
                       ? "bg-white text-violet-700 hover:bg-violet-50"
@@ -886,7 +857,7 @@ export function LandingPage() {
                 Upload Your First Video
               </Link>
               <Link
-                to="/editor"
+                to="/upload"
                 className="flex items-center gap-2 text-white border border-violet-400 hover:border-white px-8 py-3.5 rounded-xl transition-all"
               >
                 <Play className="w-4 h-4" />

@@ -19,11 +19,11 @@ export const router = createBrowserRouter([
     Component: Root,
     children: [
       { index: true, Component: LandingPage },
+      { path: "upload", Component: UploadPage },
       // Protected routes — require login
       {
         Component: ProtectedRoute,
         children: [
-          { path: "upload", Component: UploadPage },
           { path: "editor", Component: EditorPage },
           { path: "upgrade", Component: UpgradePage },
           { path: "upgrade/success", Component: UpgradeSuccessPage },
