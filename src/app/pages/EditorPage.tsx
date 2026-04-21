@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { Navigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   wordsToSubtitles,
   exportVideo as exportVideoApi,
   openRealtimeStream,
+  getVideoUrl,
   type Word,
   type ExportResolution,
   type RealtimeStreamEvent,
@@ -293,6 +294,15 @@ export function EditorPage() {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const videoFrameRef = useRef<HTMLDivElement>(null);
   const subtitleDragOffsetRef = useRef({ x: 0, y: 0 });
+  const triedServerUrlRef = useRef(false);
+
+  const loadVideoFromServer = useCallback((clearBlob = false) => {
+    const serverFilename = sessionStorage.getItem("videoServerFilename");
+    if (!serverFilename) return;
+    triedServerUrlRef.current = true;
+    if (clearBlob) sessionStorage.removeItem("videoPreviewUrl");
+    getVideoUrl(serverFilename).then(setVideoUrl).catch(() => setVideoUrl(null));
+  }, []);
 
   const cloneSubtitles = (items: Subtitle[]) => items.map((s) => ({ ...s }));
   const draftKey = (jobId: string, lang: "en" | "vi") => `subtitle_draft_${jobId}_${lang}`;
@@ -347,10 +357,16 @@ export function EditorPage() {
     const realtime = modeInUrl === "realtime" || modeInSession === "realtime";
     setIsRealtimeMode(realtime);
 
-    const url = sessionStorage.getItem("videoPreviewUrl");
-    if (url) setVideoUrl(url);
+    const blobUrl = sessionStorage.getItem("videoPreviewUrl");
+    const serverFilename = sessionStorage.getItem("videoServerFilename");
     const uploadedName = sessionStorage.getItem("uploadedFileName");
     if (uploadedName) setVideoFileName(uploadedName);
+
+    if (blobUrl) {
+      setVideoUrl(blobUrl);
+    } else if (serverFilename) {
+      loadVideoFromServer();
+    }
 
     // Đọc subtitle từ job thật
     const raw = sessionStorage.getItem("currentJob");
@@ -891,6 +907,33 @@ export function EditorPage() {
         </div>
       )}
 
+      {/* Realtime stream status bar */}
+      {isRealtimeMode && streamStatus === "streaming" && (
+        <div className="px-4 py-2 bg-indigo-950/60 border-b border-indigo-800 flex items-center gap-3">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
+            className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full flex-shrink-0"
+          />
+          <div className="flex-1 h-1.5 bg-indigo-900 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-indigo-400 rounded-full"
+              animate={{ width: `${streamProgress}%` }}
+              transition={{ ease: "easeOut" }}
+            />
+          </div>
+          <span className="text-xs text-indigo-300 whitespace-nowrap tabular-nums">
+            Realtime đang xử lý… {streamProgress}%
+          </span>
+        </div>
+      )}
+      {isRealtimeMode && streamStatus === "error" && (
+        <div className="px-4 py-2 text-xs text-red-300 bg-red-950/40 border-b border-red-900 flex items-center gap-2">
+          <span className="font-semibold">Lỗi Realtime:</span>
+          <span>{streamError}</span>
+        </div>
+      )}
+
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Video + Timeline */}
@@ -912,10 +955,18 @@ export function EditorPage() {
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
                     onEnded={() => setIsPlaying(false)}
+                    onError={() => {
+                      if (!triedServerUrlRef.current) {
+                        loadVideoFromServer(true);
+                      } else {
+                        setVideoUrl(null);
+                        sessionStorage.removeItem("videoPreviewUrl");
+                      }
+                    }}
                   />
                 ) : (
                   <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-500 text-sm">
-                    No video preview available
+                    Đang tải video…
                   </div>
                 )}
 

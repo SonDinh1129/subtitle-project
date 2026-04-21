@@ -194,7 +194,12 @@ def upload_video():  # noqa: C901
         t = threading.Thread(target=run_pipeline, args=(job_id, colab_url), daemon=True)
     t.start()
 
-    return jsonify({"job_id": job_id, "status": JobStatus.QUEUED, "process_mode": process_mode}), 200
+    return jsonify({
+        "job_id": job_id,
+        "status": JobStatus.QUEUED,
+        "process_mode": process_mode,
+        "video_filename": f"{job_id}_{safe_name}",
+    }), 200
 
 
 @subtitle_bp.get("/jobs/<job_id>/stream")

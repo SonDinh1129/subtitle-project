@@ -27,7 +27,7 @@ const LANGUAGES = [
   { id: "vi", en: "Vietnamese → English", vi: "Tiếng Việt → Tiếng Anh" },
 ];
 
-type UploadState = "idle" | "dragover" | "uploading" | "processing" | "done" | "error";
+type UploadState = "idle" | "dragover" | "uploading" | "processing" | "realtime_warming" | "done" | "error";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -88,13 +88,13 @@ export function UploadPage() {
 
     try {
       setUploadError(null);
-      // uploadVideo trả về string (job_id trực tiếp)
-      const jobId = await uploadVideo(file, processMode, "segment", (pct) => {
+      const { jobId, videoFilename } = await uploadVideo(file, processMode, "segment", (pct) => {
         setUploadProgress(pct);
       }, language as "en" | "vi");
 
       sessionStorage.setItem("uploadedFileName", file.name);
       sessionStorage.setItem("subtitleProcessMode", processMode);
+      sessionStorage.setItem("videoServerFilename", videoFilename);
 
       if (processMode === "realtime") {
         sessionStorage.setItem(
@@ -107,6 +107,10 @@ export function UploadPage() {
             vietnamese_words: [],
           }),
         );
+        // Giữ màn hình warmup ~2.5s để model khởi động trước khi chuyển sang Editor.
+        // Khi user đến Editor, words đầu tiên đã có sẵn trong queue → sub hiện ngay.
+        setState("realtime_warming");
+        await new Promise<void>((resolve) => setTimeout(resolve, 2500));
         navigate(`/editor?mode=realtime&job_id=${encodeURIComponent(jobId)}`);
         return;
       }
@@ -380,6 +384,77 @@ export function UploadPage() {
                           />
                         </div>
                       </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {state === "realtime_warming" && (
+                <motion.div
+                  key="realtime_warming"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white dark:bg-gray-900 border border-violet-200 dark:border-violet-700 rounded-2xl p-8 shadow-sm"
+                >
+                  <div className="text-center">
+                    {/* Pulsing rings + icon */}
+                    <div className="relative w-24 h-24 mx-auto mb-6">
+                      <motion.div
+                        className="absolute inset-0 rounded-full border-2 border-violet-300 dark:border-violet-600 opacity-60"
+                        animate={{ scale: [1, 1.35, 1], opacity: [0.6, 0, 0.6] }}
+                        transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut" }}
+                      />
+                      <motion.div
+                        className="absolute inset-2 rounded-full border-2 border-violet-400 dark:border-violet-500 opacity-40"
+                        animate={{ scale: [1, 1.25, 1], opacity: [0.4, 0, 0.4] }}
+                        transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut", delay: 0.4 }}
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-100 to-indigo-100 dark:from-violet-900/40 dark:to-indigo-900/40 border border-violet-200 dark:border-violet-700 flex items-center justify-center">
+                          <motion.div
+                            animate={{ rotate: 360 }}
+                            transition={{ repeat: Infinity, duration: 2.4, ease: "linear" }}
+                          >
+                            <Zap className="w-7 h-7 text-violet-500" />
+                          </motion.div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <h3 className="text-gray-900 dark:text-gray-100 mb-1">
+                      {isVi ? "Đang khởi động Realtime" : "Starting Realtime Mode"}
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-300 mb-5">
+                      {isVi
+                        ? "Mô hình AI đang khởi động để sẵn sàng xử lý ngay khi bạn vào Editor…"
+                        : "AI model is warming up so subtitles appear instantly when you enter the Editor…"}
+                    </p>
+
+                    {/* Animated step indicators */}
+                    <div className="flex items-center justify-center gap-6">
+                      {([
+                        { label: isVi ? "Kết nối" : "Connect", delay: 0 },
+                        { label: isVi ? "Khởi động" : "Warm up", delay: 0.8 },
+                        { label: isVi ? "Sẵn sàng" : "Ready", delay: 1.8 },
+                      ] as const).map((step) => (
+                        <motion.div
+                          key={step.label}
+                          className="flex items-center gap-1.5"
+                          initial={{ opacity: 0.3 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: step.delay, duration: 0.4 }}
+                        >
+                          <motion.div
+                            className="w-4 h-4 rounded-full bg-violet-600 flex items-center justify-center"
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: step.delay, type: "spring", stiffness: 300 }}
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-white" />
+                          </motion.div>
+                          <span className="text-xs text-gray-500 dark:text-gray-300">{step.label}</span>
+                        </motion.div>
+                      ))}
                     </div>
                   </div>
                 </motion.div>

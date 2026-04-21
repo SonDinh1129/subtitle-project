@@ -13,10 +13,17 @@ export function AuthCallbackPage() {
       const code = params.get("code");
       const tokenHash = params.get("token_hash");
       const type = params.get("type") as "signup" | "recovery" | "email_change" | null;
+      const errorParam = params.get("error");
       const errorDesc = params.get("error_description");
 
-      if (errorDesc) {
-        setError(errorDesc);
+      // User cancelled at Google consent screen — silent redirect back
+      if (errorParam === "access_denied") {
+        navigate("/signin", { replace: true });
+        return;
+      }
+
+      if (errorParam || errorDesc) {
+        setError(errorDesc ?? errorParam ?? "Xác thực thất bại.");
         return;
       }
 

@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2 } from "lucide-react";
 import { AuthRightPanel } from "../components/AuthRightPanel";
 import { useUiPreferences } from "../context/UiPreferencesContext";
-import { supabase } from "../../lib/supabase";
+import { supabase, signInWithGoogle } from "../../lib/supabase";
 
 function GoogleIcon() {
   return (
@@ -68,7 +68,9 @@ export function SignUpPage() {
   const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
   const [signUpSuccess, setSignUpSuccess] = useState(false);
   const [errors, setErrors] = useState<{
     fullName?: string;
@@ -88,9 +90,14 @@ export function SignUpPage() {
     return e;
   };
 
-  const handleOAuth = async () => {
-    const redirectTo = `${window.location.origin}/auth/callback`;
-    await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
+  const handleGoogleSignIn = async () => {
+    setOauthLoading(true);
+    setOauthError(null);
+    const { error } = await signInWithGoogle();
+    if (error) {
+      setOauthError(error);
+      setOauthLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -213,13 +220,24 @@ export function SignUpPage() {
           >
             <button
               type="button"
-              onClick={() => handleOAuth()}
-              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
+              onClick={handleGoogleSignIn}
+              disabled={oauthLoading}
+              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
               style={{ fontSize: "0.9375rem", fontWeight: 500 }}
             >
-              <GoogleIcon />
+              {oauthLoading ? (
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <GoogleIcon />
+              )}
               {isVi ? "Tiếp tục với Google" : "Continue with Google"}
             </button>
+            {oauthError && (
+              <p className="text-red-500 text-center" style={{ fontSize: "0.8125rem" }}>{oauthError}</p>
+            )}
           </motion.div>
 
           {/* Divider */}

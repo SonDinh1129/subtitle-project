@@ -104,6 +104,11 @@ export interface JobResponse {
 
 export type ProcessMode = "normal" | "realtime";
 
+export interface UploadResponse {
+  jobId: string;
+  videoFilename: string;
+}
+
 export interface StreamSegmentEvent {
   type: "segment";
   index: number;
@@ -180,7 +185,7 @@ export async function uploadVideo(
   translationMode: "segment" | "sentence" = "segment",
   onProgress?: (pct: number) => void,
   sourceLang: "en" | "vi" = "en",
-): Promise<string> {
+): Promise<UploadResponse> {
   const authToken = await getAuthHeader();
 
   return new Promise((resolve, reject) => {
@@ -196,7 +201,11 @@ export async function uploadVideo(
     });
     xhr.addEventListener("load", () => {
       if (xhr.status === 200) {
-        resolve((JSON.parse(xhr.responseText) as { job_id: string }).job_id);
+        const parsed = JSON.parse(xhr.responseText) as { job_id: string; video_filename?: string };
+        resolve({
+          jobId: parsed.job_id,
+          videoFilename: parsed.video_filename ?? parsed.job_id,
+        });
       } else {
         reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
       }
@@ -206,6 +215,14 @@ export async function uploadVideo(
     if (authToken) xhr.setRequestHeader("Authorization", authToken);
     xhr.send(form);
   });
+}
+
+export async function getVideoUrl(videoFilename: string): Promise<string> {
+  const authHeader = await getAuthHeader();
+  const path = `/video/${encodeURIComponent(videoFilename)}`;
+  if (!authHeader) return `${BASE}${path}`;
+  const token = authHeader.slice(7); // strip "Bearer "
+  return `${BASE}${path}?token=${encodeURIComponent(token)}`;
 }
 
 export async function openRealtimeStream(
