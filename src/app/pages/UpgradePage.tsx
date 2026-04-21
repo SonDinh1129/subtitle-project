@@ -177,8 +177,8 @@ export function UpgradePage() {
 
         <p className="text-center text-xs text-gray-400 dark:text-gray-500">
           {isVi
-            ? "Thanh toán an toàn qua PayOS (QR, Momo, ZaloPay, thẻ nội địa). Không hoàn tiền sau khi kích hoạt."
-            : "Secure payment via PayOS (QR, Momo, ZaloPay, local cards). No refunds after activation."}
+            ? "Thanh toán an toàn qua MoMo. Không hoàn tiền sau khi kích hoạt."
+            : "Secure payment via MoMo. No refunds after activation."}
         </p>
       </div>
     </div>

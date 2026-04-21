@@ -8,6 +8,14 @@ export function AuthCallbackPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Catch hash-based implicit flow: Supabase fires PASSWORD_RECOVERY when it detects
+    // #access_token=...&type=recovery in the URL fragment (legacy email template).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        navigate("/reset-password", { replace: true });
+      }
+    });
+
     const handle = async () => {
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
@@ -16,7 +24,6 @@ export function AuthCallbackPage() {
       const errorParam = params.get("error");
       const errorDesc = params.get("error_description");
 
-      // User cancelled at Google consent screen — silent redirect back
       if (errorParam === "access_denied") {
         navigate("/signin", { replace: true });
         return;
@@ -27,33 +34,30 @@ export function AuthCallbackPage() {
         return;
       }
 
-      // OAuth PKCE flow — exchange code for session
+      // PKCE code flow — used by both OAuth and recovery email (newer Supabase)
       if (code) {
         const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
         if (exchangeError) {
           setError(exchangeError.message);
           return;
         }
-        navigate("/upload", { replace: true });
+        navigate(type === "recovery" ? "/reset-password" : "/upload", { replace: true });
         return;
       }
 
-      // Email OTP flow — verify token hash
+      // Email OTP / token_hash flow
       if (tokenHash && type) {
         const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
         if (verifyError) {
           setError(verifyError.message);
           return;
         }
-        if (type === "recovery") {
-          navigate("/reset-password", { replace: true });
-        } else {
-          navigate("/upload", { replace: true });
-        }
+        navigate(type === "recovery" ? "/reset-password" : "/upload", { replace: true });
         return;
       }
 
-      // No recognized params — check if session already exists (e.g. hash-based implicit flow)
+      // Hash-based implicit flow handled by onAuthStateChange above.
+      // Fallback: check if session already established.
       const { data } = await supabase.auth.getSession();
       if (data.session) {
         navigate("/upload", { replace: true });
@@ -63,6 +67,7 @@ export function AuthCallbackPage() {
     };
 
     handle();
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
   if (error) {

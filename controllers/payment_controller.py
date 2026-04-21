@@ -1,16 +1,12 @@
 """
-payment_controller.py — PayOS payment endpoints
-─────────────────────────────────────────────────
+payment_controller.py — MoMo payment endpoints
+───────────────────────────────────────────────
 Routes:
-  POST /api/payment/create-order  — create PayOS order, return payment URL
-  POST /api/payment/webhook       — receive PayOS payment confirmation
+  POST /api/payment/create-order  — create MoMo order, return payment URL
+  POST /api/payment/ipn           — receive MoMo IPN (server-to-server)
 """
 
 import os
-import hmac
-import hashlib
-import json
-import time
 from datetime import datetime, timezone
 
 import requests
@@ -18,32 +14,10 @@ from flask import Blueprint, g, request, jsonify
 
 from middleware.auth import require_auth, get_profile, is_premium, _get_supabase_service
 from extensions import limiter
+from models.momo import create_momo_payment, verify_momo_ipn
 
 payment_bp = Blueprint("payment", __name__)
 
-PAYOS_API_BASE = "https://api-merchant.payos.vn"
-
-
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
-def _build_payos_signature(data: dict) -> str:
-    """Sign PayOS fields with HMAC-SHA256. Excludes 'signature' key."""
-    canonical = "&".join(f"{k}={v}" for k, v in sorted(data.items()) if k != "signature")
-    return hmac.new(
-        os.environ.get("PAYOS_CHECKSUM_KEY", "").encode("utf-8"),
-        canonical.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-
-def _verify_payos_signature(data: dict, received_signature: str) -> bool:
-    """Verify PayOS HMAC-SHA256 webhook signature."""
-    if not os.environ.get("PAYOS_CHECKSUM_KEY"):
-        return False
-    return hmac.compare_digest(_build_payos_signature(data), received_signature)
-
-
-# ─── Routes ──────────────────────────────────────────────────────────────────
 
 @payment_bp.post("/create-order")
 @require_auth
@@ -51,8 +25,8 @@ def _verify_payos_signature(data: dict, received_signature: str) -> bool:
 def create_order():
     """
     POST /api/payment/create-order
-    Creates a PayOS payment order for premium upgrade (99,000 VND one-time).
-    Returns { payment_url } to redirect user to PayOS checkout.
+    Creates a MoMo payment order for premium upgrade (99,000 VND lifetime).
+    Returns { payment_url } to redirect user to MoMo checkout.
     """
     profile = get_profile(g.user_id)
     if not profile:
@@ -61,102 +35,71 @@ def create_order():
     if is_premium(profile):
         return jsonify({"error": "Already premium"}), 409
 
-    payos_client_id  = os.environ.get("PAYOS_CLIENT_ID", "")
-    payos_api_key    = os.environ.get("PAYOS_API_KEY", "")
-    payos_checksum   = os.environ.get("PAYOS_CHECKSUM_KEY", "")
-    frontend_url     = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+    partner_code = os.environ.get("MOMO_PARTNER_CODE", "")
+    access_key   = os.environ.get("MOMO_ACCESS_KEY", "")
+    secret_key   = os.environ.get("MOMO_SECRET_KEY", "")
+    ngrok_url    = os.environ.get("NGROK_URL", "").rstrip("/")
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
-    if not all([payos_client_id, payos_api_key, payos_checksum]):
-        return jsonify({"error": "PayOS not configured"}), 503
+    if not all([partner_code, access_key, secret_key, ngrok_url]):
+        return jsonify({"error": "MoMo not configured"}), 503
 
-    # Build order ID (unique, numeric, max 15 chars)
-    order_code = int(time.time() * 1000) % 10**13  # 13-digit ms timestamp
-
-    amount = 99000  # VND
-
-    sig_data = {
-        "amount": amount,
-        "cancelUrl": f"{frontend_url}/upgrade",
-        "description": "SubAI Premium",
-        "orderCode": order_code,
-        "returnUrl": f"{frontend_url}/upgrade/success",
-    }
-    signature = _build_payos_signature(sig_data)
-
-    payload = {
-        **sig_data,
-        "signature": signature,
-        "buyerEmail": profile.get("email", ""),
-        "buyerName": profile.get("full_name", ""),
-        "items": [{"name": "SubAI Premium (lifetime)", "quantity": 1, "price": amount}],
-    }
+    amount       = 99000
+    redirect_url = f"{frontend_url}/upgrade/success"
+    ipn_url      = f"{ngrok_url}/api/payment/ipn"
+    order_info   = "SubAI Premium (lifetime)"
 
     try:
-        resp = requests.post(
-            f"{PAYOS_API_BASE}/v2/payment-requests",
-            json=payload,
-            headers={
-                "x-client-id": payos_client_id,
-                "x-api-key": payos_api_key,
-                "Content-Type": "application/json",
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        if data.get("code") != "00":
-            return jsonify({"error": data.get("desc", "PayOS error")}), 502
-
-        payment_url = data["data"]["checkoutUrl"]
-        payos_order_id = str(order_code)
-
-        # Persist payment record
-        supabase = _get_supabase_service()
-        supabase.table("payments").insert({
-            "user_id": g.user_id,
-            "payos_order_id": payos_order_id,
-            "amount": amount,
-            "currency": "VND",
-            "status": "pending",
-        }).execute()
-
-        return jsonify({"payment_url": payment_url, "order_id": payos_order_id}), 200
-
+        momo_resp, order_id = create_momo_payment(amount, order_info, redirect_url, ipn_url)
     except requests.RequestException as exc:
-        return jsonify({"error": f"PayOS request failed: {exc}"}), 502
+        return jsonify({"error": f"MoMo request failed: {exc}"}), 502
+
+    result_code = momo_resp.get("resultCode", -1)
+    if result_code != 0:
+        return jsonify({"error": momo_resp.get("message", "MoMo error")}), 502
+
+    payment_url = momo_resp.get("payUrl", "")
+
+    supabase = _get_supabase_service()
+    supabase.table("payments").insert({
+        "user_id":        g.user_id,
+        "momo_order_id":  order_id,
+        "amount":         amount,
+        "currency":       "VND",
+        "status":         "pending",
+    }).execute()
+
+    return jsonify({"payment_url": payment_url, "order_id": order_id}), 200
 
 
-@payment_bp.post("/webhook")
-def payment_webhook():
+@payment_bp.post("/ipn")
+def payment_ipn():
     """
-    POST /api/payment/webhook
-    Receives PayOS payment confirmation.
-    No auth — called by PayOS servers.
-    Idempotent: safe to call multiple times with same order.
+    POST /api/payment/ipn
+    Receives MoMo IPN callback (server-to-server, no user auth).
+    Idempotent: safe to call multiple times with the same order.
     """
     data = request.get_json(silent=True) or {}
 
-    signature = data.pop("signature", "")
-    if not _verify_payos_signature(data, signature):
+    if not verify_momo_ipn(data):
         return jsonify({"error": "Invalid signature"}), 400
 
-    order_code = str(data.get("orderCode", ""))
-    status_code = data.get("code", "")
+    order_id    = data.get("orderId", "")
+    result_code = data.get("resultCode", -1)
 
-    if status_code != "00":
-        # Payment not successful (cancelled, failed, etc.)
+    if result_code != 0:
         return jsonify({"ok": True}), 200
 
     supabase = _get_supabase_service()
 
-    # Look up the payment record (idempotency check)
     try:
-        result = supabase.table("payments") \
-            .select("id, user_id, status") \
-            .eq("payos_order_id", order_code) \
-            .single() \
+        result = (
+            supabase.table("payments")
+            .select("id, user_id, status")
+            .eq("momo_order_id", order_id)
+            .single()
             .execute()
+        )
         payment = result.data
     except Exception:
         return jsonify({"error": "Payment record not found"}), 404
@@ -164,20 +107,17 @@ def payment_webhook():
     if not payment:
         return jsonify({"error": "Payment record not found"}), 404
 
-    # Idempotent: skip if already processed
     if payment.get("status") == "paid":
         return jsonify({"ok": True}), 200
 
     user_id = payment["user_id"]
-    now = datetime.now(timezone.utc).isoformat()
+    now     = datetime.now(timezone.utc).isoformat()
 
-    # Mark payment as paid
     supabase.table("payments").update({
-        "status": "paid",
+        "status":  "paid",
         "paid_at": now,
-    }).eq("payos_order_id", order_code).execute()
+    }).eq("momo_order_id", order_id).execute()
 
-    # Activate premium (lifetime = far future date)
     supabase.table("profiles").update({
         "premium_until": "9999-12-31T23:59:59+00:00",
     }).eq("id", user_id).execute()
