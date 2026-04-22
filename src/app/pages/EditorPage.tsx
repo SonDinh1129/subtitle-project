@@ -283,6 +283,7 @@ export function EditorPage() {
   const [englishWords, setEnglishWords] = useState<Word[]>([]);
   const [vietnameseWords, setVietnameseWords] = useState<Word[]>([]);
   const [inProgressWords, setInProgressWords] = useState<string[]>([]);
+  const [latestRealtimeSegment, setLatestRealtimeSegment] = useState<{ en: string; vi: string } | null>(null);
   const [isRealtimeMode, setIsRealtimeMode] = useState(false);
   const [streamProgress, setStreamProgress] = useState(0);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
@@ -439,6 +440,7 @@ export function EditorPage() {
 
         if (evt.type === "snapshot") {
           setInProgressWords([]);
+          setLatestRealtimeSegment(null);
           setStreamProgress(evt.progress ?? 0);
           setEnglishWords(evt.english_words ?? []);
           setVietnameseWords(evt.vietnamese_words ?? []);
@@ -451,6 +453,11 @@ export function EditorPage() {
 
         if (evt.type === "segment") {
           setInProgressWords([]);
+          const enText = (evt.english_words ?? []).map((w) => w.word).join(" ");
+          const viText = (evt.vietnamese_words ?? []).map((w) => w.word).join(" ");
+          if (enText || viText) {
+            setLatestRealtimeSegment({ en: enText, vi: viText });
+          }
           setStreamProgress(evt.progress ?? 0);
           setEnglishWords((prev) => [...prev, ...(evt.english_words ?? [])]);
           setVietnameseWords((prev) => [...prev, ...(evt.vietnamese_words ?? [])]);
@@ -703,11 +710,17 @@ export function EditorPage() {
     : (currentSubtitleVi?.text ?? "");
 
   const isDualMode = subtitleDisplayMode === "dual-vi-top" || subtitleDisplayMode === "dual-en-top";
-  // Trong realtime+dual mode: chỉ hiện inProgressWords, không fallback về committed subtitle.
-  // Fallback về textEn gây lặp từ — committed subtitle có cùng timestamp với words vừa stream xong.
+
+  // Trong realtime+dual mode: bypass time-based lookup hoàn toàn.
+  // frame_ts timestamps của Colab không align với video currentTime → lookup sai/mắc kẹt.
+  // EN: stream từng từ qua inProgressWords (empty giữa các segment)
+  // VI: giữ nguyên bản dịch segment gần nhất cho đến khi segment mới đến
   const textEnLive = isDualMode && isRealtimeMode
     ? inProgressWords.join(" ")
     : textEn;
+  const textViLive = isDualMode && isRealtimeMode
+    ? (latestRealtimeSegment?.vi ?? "")
+    : textVi;
 
   const subtitleLines = useMemo(() => {
     switch (subtitleDisplayMode) {
@@ -718,13 +731,13 @@ export function EditorPage() {
       case "vi-only":
         return textVi ? [textVi] : [];
       case "dual-vi-top":
-        return [textVi, textEnLive].filter(Boolean);
+        return [textViLive, textEnLive].filter(Boolean);
       case "dual-en-top":
-        return [textEnLive, textVi].filter(Boolean);
+        return [textEnLive, textViLive].filter(Boolean);
       default:
         return [] as string[];
     }
-  }, [subtitleDisplayMode, textEn, textVi, textEnLive]);
+  }, [subtitleDisplayMode, textEn, textVi, textEnLive, textViLive]);
 
   const filteredSubtitles = subtitles.filter((s) =>
     s.text.toLowerCase().includes(searchTerm.toLowerCase())

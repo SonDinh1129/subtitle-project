@@ -250,8 +250,6 @@ app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
 
-_PUNCT_BOUNDARIES = {".", "?", "!", ","}
-
 class WordSegmentAccumulator:
     def __init__(self):
         self.words = []
@@ -272,11 +270,11 @@ class WordSegmentAccumulator:
         if not self.words:
             return False
         duration = self.words[-1]["end"] - self.segment_start
-        # punctuation boundary / 0.4s silence / 1.5s tối đa
-        # Không flush theo số từ — ảnh hưởng xấu đến chất lượng dịch tiếng Việt
+        # 0.4s silence hoặc 1.5s tối đa — giữ nguyên như logic gốc
+        # Punctuation flush đã bị bỏ: moshi đôi khi attach dấu câu vào từ
+        # (vd. "today.") làm flush sau 1 từ → segment 1 từ → VI dịch sai
         return (
-            (last_word and last_word[-1] in _PUNCT_BOUNDARIES)
-            or (now_wall - self.last_word_wall_time) > 0.4
+            (now_wall - self.last_word_wall_time) > 0.4
             or duration > 1.5
         )
 
