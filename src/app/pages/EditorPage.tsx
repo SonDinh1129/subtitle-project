@@ -714,7 +714,7 @@ export function EditorPage() {
   // Bypass time-based lookup CHỈ KHI đang streaming active (mọi mode).
   // Khi stream xong hoặc user scrub lại, dùng time-based lookup bình thường
   // để subtitle đồng bộ với vị trí video.
-  const isLiveStreaming = isRealtimeMode && streamStatus === "streaming";
+  const isLiveStreaming = isRealtimeMode && streamStatus === "streaming" && isPlaying;
   const textEnLive = isLiveStreaming
     ? inProgressWords.join(" ")
     : textEn;

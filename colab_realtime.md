@@ -270,12 +270,12 @@ class WordSegmentAccumulator:
         if not self.words:
             return False
         duration = self.words[-1]["end"] - self.segment_start
-        # 0.4s silence hoặc 1.5s tối đa — giữ nguyên như logic gốc
-        # Punctuation flush đã bị bỏ: moshi đôi khi attach dấu câu vào từ
-        # (vd. "today.") làm flush sau 1 từ → segment 1 từ → VI dịch sai
+        # 0.7s silence hoặc 2.5s tối đa
+        # 0.4s quá thấp: người nói lấy hơi giữa câu (~0.3-0.5s) cũng bị flush
+        # → cụm từ bị cắt giữa chừng → VinAI mất ngữ cảnh → VI thiếu chữ
         return (
-            (now_wall - self.last_word_wall_time) > 0.4
-            or duration > 1.5
+            (now_wall - self.last_word_wall_time) > 0.7
+            or duration > 2.5
         )
 
     def flush(self):
