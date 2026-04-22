@@ -703,7 +703,9 @@ export function EditorPage() {
     : (currentSubtitleVi?.text ?? "");
 
   const isDualMode = subtitleDisplayMode === "dual-vi-top" || subtitleDisplayMode === "dual-en-top";
-  const textEnLive = isDualMode && inProgressWords.length > 0
+  // Trong realtime+dual mode: chỉ hiện inProgressWords, không fallback về committed subtitle.
+  // Fallback về textEn gây lặp từ — committed subtitle có cùng timestamp với words vừa stream xong.
+  const textEnLive = isDualMode && isRealtimeMode
     ? inProgressWords.join(" ")
     : textEn;
 

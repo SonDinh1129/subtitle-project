@@ -272,10 +272,10 @@ class WordSegmentAccumulator:
         if not self.words:
             return False
         duration = self.words[-1]["end"] - self.segment_start
-        # 6 từ / punctuation / 0.4s silence / 1.5s tối đa
+        # punctuation boundary / 0.4s silence / 1.5s tối đa
+        # Không flush theo số từ — ảnh hưởng xấu đến chất lượng dịch tiếng Việt
         return (
-            len(self.words) >= 6
-            or (last_word and last_word[-1] in _PUNCT_BOUNDARIES)
+            (last_word and last_word[-1] in _PUNCT_BOUNDARIES)
             or (now_wall - self.last_word_wall_time) > 0.4
             or duration > 1.5
         )
