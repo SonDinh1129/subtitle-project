@@ -711,14 +711,14 @@ export function EditorPage() {
 
   const isDualMode = subtitleDisplayMode === "dual-vi-top" || subtitleDisplayMode === "dual-en-top";
 
-  // Trong realtime+dual mode: bypass time-based lookup hoàn toàn.
-  // frame_ts timestamps của Colab không align với video currentTime → lookup sai/mắc kẹt.
-  // EN: stream từng từ qua inProgressWords (empty giữa các segment)
-  // VI: giữ nguyên bản dịch segment gần nhất cho đến khi segment mới đến
-  const textEnLive = isDualMode && isRealtimeMode
+  // Bypass time-based lookup CHỈ KHI đang streaming active.
+  // Khi stream xong hoặc user scrub lại, dùng time-based lookup bình thường
+  // để subtitle đồng bộ với vị trí video.
+  const isLiveStreaming = isDualMode && isRealtimeMode && streamStatus === "streaming";
+  const textEnLive = isLiveStreaming
     ? inProgressWords.join(" ")
     : textEn;
-  const textViLive = isDualMode && isRealtimeMode
+  const textViLive = isLiveStreaming
     ? (latestRealtimeSegment?.vi ?? "")
     : textVi;
 
