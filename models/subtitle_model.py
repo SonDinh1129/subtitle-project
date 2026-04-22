@@ -907,8 +907,18 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
         chunk_count = 0
 
         for event in event_iter:
-            if event.get("type") == "segment_error":
+            ev_type = event.get("type")
+
+            if ev_type == "segment_error":
                 emit_job_event(job_id, event)
+                continue
+
+            if ev_type == "word_partial":
+                emit_job_event(job_id, {
+                    "type": "word_partial",
+                    "word": event.get("word", ""),
+                    "frame_ts": event.get("frame_ts", 0.0),
+                })
                 continue
 
             if event.get("skipped"):

@@ -282,6 +282,7 @@ export function EditorPage() {
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [englishWords, setEnglishWords] = useState<Word[]>([]);
   const [vietnameseWords, setVietnameseWords] = useState<Word[]>([]);
+  const [inProgressWords, setInProgressWords] = useState<string[]>([]);
   const [isRealtimeMode, setIsRealtimeMode] = useState(false);
   const [streamProgress, setStreamProgress] = useState(0);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
@@ -427,7 +428,17 @@ export function EditorPage() {
     openRealtimeStream(currentJobId, {
       onEvent: (evt: RealtimeStreamEvent) => {
         if (cancelled) return;
+
+        if (evt.type === "word_partial") {
+          setInProgressWords((prev) => {
+            const updated = [...prev, evt.word];
+            return updated.slice(-12);
+          });
+          return;
+        }
+
         if (evt.type === "snapshot") {
+          setInProgressWords([]);
           setStreamProgress(evt.progress ?? 0);
           setEnglishWords(evt.english_words ?? []);
           setVietnameseWords(evt.vietnamese_words ?? []);
@@ -439,6 +450,7 @@ export function EditorPage() {
         }
 
         if (evt.type === "segment") {
+          setInProgressWords([]);
           setStreamProgress(evt.progress ?? 0);
           setEnglishWords((prev) => [...prev, ...(evt.english_words ?? [])]);
           setVietnameseWords((prev) => [...prev, ...(evt.vietnamese_words ?? [])]);
@@ -492,6 +504,12 @@ export function EditorPage() {
     if (!isRealtimeMode) return;
     setVietnameseSubtitles((prev) => mergeMappedWithDraft(prev, mapWordsToUiSubtitles(vietnameseWords)));
   }, [vietnameseWords, isRealtimeMode]);
+
+  useEffect(() => {
+    if (inProgressWords.length === 0) return;
+    const timer = setTimeout(() => setInProgressWords([]), 3000);
+    return () => clearTimeout(timer);
+  }, [inProgressWords]);
 
   useEffect(() => {
     const preferred = subtitleLang === "vi" ? vietnameseSubtitles : englishSubtitles;
@@ -684,6 +702,11 @@ export function EditorPage() {
     ? buildProgressiveFromSubtitle(currentSubtitleVi)
     : (currentSubtitleVi?.text ?? "");
 
+  const isDualMode = subtitleDisplayMode === "dual-vi-top" || subtitleDisplayMode === "dual-en-top";
+  const textEnLive = isDualMode && inProgressWords.length > 0
+    ? inProgressWords.join(" ")
+    : textEn;
+
   const subtitleLines = useMemo(() => {
     switch (subtitleDisplayMode) {
       case "off":
@@ -693,13 +716,13 @@ export function EditorPage() {
       case "vi-only":
         return textVi ? [textVi] : [];
       case "dual-vi-top":
-        return [textVi, textEn].filter(Boolean);
+        return [textVi, textEnLive].filter(Boolean);
       case "dual-en-top":
-        return [textEn, textVi].filter(Boolean);
+        return [textEnLive, textVi].filter(Boolean);
       default:
         return [] as string[];
     }
-  }, [subtitleDisplayMode, textEn, textVi]);
+  }, [subtitleDisplayMode, textEn, textVi, textEnLive]);
 
   const filteredSubtitles = subtitles.filter((s) =>
     s.text.toLowerCase().includes(searchTerm.toLowerCase())

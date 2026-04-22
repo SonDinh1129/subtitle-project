@@ -142,12 +142,19 @@ export interface StreamSegmentErrorEvent {
   message: string;
 }
 
+export interface WordPartialEvent {
+  type: "word_partial";
+  word: string;
+  frame_ts: number;
+}
+
 export type RealtimeStreamEvent =
   | StreamSegmentEvent
   | StreamSnapshotEvent
   | StreamDoneEvent
   | StreamErrorEvent
-  | StreamSegmentErrorEvent;
+  | StreamSegmentErrorEvent
+  | WordPartialEvent;
 
 export type ExportResolution = "360p" | "720p" | "1080p";
 export type SubtitleLang = "en" | "vi";
