@@ -8,7 +8,7 @@
 
 ## Problem
 
-Hệ thống hiện tại tích lũy từ vào `WordSegmentAccumulator` và chỉ gửi subtitle sau khi dịch xong (~200-400ms sau khi đủ 4 từ hoặc có 0.4s silence). Người dùng không thấy gì trong khoảng thời gian đó — cảm giác lag rõ ràng so với âm thanh.
+Hệ thống hiện tại tích lũy từ vào `WordSegmentAccumulator` và chỉ gửi subtitle sau khi dịch xong (~200-400ms sau khi đủ từ hoặc có 0.4s silence). Người dùng không thấy gì trong khoảng thời gian đó — cảm giác lag rõ ràng so với âm thanh.
 
 ---
 
@@ -18,20 +18,20 @@ Trong mode `dual-vi-top` và `dual-en-top`:
 - **Slot EN:** Từng từ tiếng Anh xuất hiện ngay khi moshi decode xong (không chờ dịch)
 - **Slot VI:** Tiếng Việt xuất hiện khi translation hoàn thành, ghi đè slot EN thành bản hoàn chỉnh
 
-Chấp nhận: từ tiếng Anh đôi khi bị thay đổi do moshi chỉnh sửa (tradeoff đổi lấy latency thấp nhất).
+Tradeoff chấp nhận: moshi là streaming ASR, có thể retroactively correct token trước — tỷ lệ correction ~15-25% ở từ cuối segment. Để giảm flicker, `word_partial` chỉ được emit sau khi từ đã được "commit" (từ hoàn chỉnh, không phải partial token — đây là hành vi tự nhiên của logic `prev_decoded = current_decoded.rsplit(" ", 1)[0] + " "` hiện tại). Chấp nhận flicker ở mức tối thiểu còn lại để đổi lấy latency thấp nhất.
 
 ---
 
 ## Architecture
 
 ```
-Moshi decode word
+Moshi decode word (committed — đã có space phía sau)
     │
     ├─► [NGAY LẬP TỨC] send word_partial → Backend → SSE → Frontend slot EN
     │
     └─► WordSegmentAccumulator
             │
-            flush (4 words OR 0.4s silence OR 1.5s max)
+            flush (6 words OR punctuation boundary OR 0.4s silence OR 1.5s max)
             │
             translate (VinAI ~200-400ms)
             │
@@ -43,7 +43,7 @@ Moshi decode word
 Colab Flask WS (/ws/transcribe_kyutai)
     → websocket → subtitle_model.py (run_pipeline_realtime)
     → emit_job_event() → job queue
-    → subtitle_controller.py (stream_job_realtime SSE)
+    → subtitle_controller.py (stream_job_realtime SSE, flush after each event)
     → EventSource → Frontend (EditorPage.tsx)
 ```
 
@@ -57,9 +57,11 @@ Colab Flask WS (/ws/transcribe_kyutai)
 { "type": "word_partial", "word": "hello", "frame_ts": 1.23 }
 ```
 
-Gửi ngay khi moshi decode được một từ mới. Không có thông tin VI.
+Gửi ngay khi moshi commit được một từ hoàn chỉnh. Không có thông tin VI.
 
-### Đổi tên: `segment_complete` → vẫn dùng `"segment"` trên SSE
+**Lưu ý `frame_ts`:** Là timestamp tính từ đầu audio stream (`frame_idx * 0.08`), không phải wall clock. Nếu có reconnect, `frame_ts` reset về 0. Frontend hiện tại chưa dùng `frame_ts` để sync — đây là known limitation, để nguyên trong scope này.
+
+### `segment_complete` → relay thành `"segment"` trên SSE
 
 Để không break frontend hiện tại, message type trên SSE vẫn là `"segment"`. Chỉ thêm trường `"type": "segment_complete"` trong Colab WS để backend phân biệt với các message khác.
 
@@ -81,24 +83,29 @@ with send_lock:
     }))
 ```
 
-**2. Thêm điều kiện flush 4 từ vào `WordSegmentAccumulator.should_flush()`:**
+**2. Điều chỉnh flush trigger — tăng lên 6 từ, thêm punctuation boundary:**
 
 ```python
-def should_flush(self, now_wall):
+_PUNCT_BOUNDARIES = {".", "?", "!", ","}
+
+def should_flush(self, now_wall, last_word=""):
     if not self.words: return False
     duration = self.words[-1]["end"] - self.segment_start
     return (
-        len(self.words) >= 4 or
-        (now_wall - self.last_word_wall_time) > 0.4 or
-        duration > 1.5
+        len(self.words) >= 6 or                              # đủ 6 từ (tăng từ 4)
+        (last_word and last_word[-1] in _PUNCT_BOUNDARIES) or  # punctuation boundary
+        (now_wall - self.last_word_wall_time) > 0.4 or      # silence 0.4s
+        duration > 1.5                                        # tối đa 1.5s
     )
 ```
+
+Ngưỡng 6 từ thay vì 4 vì tiếng Việt là analytic language — cụm quá ngắn (4 từ) thiếu ngữ cảnh cho VinAI, đặc biệt với relative clauses và câu phức. Punctuation boundary cho phép flush sớm tại điểm ngắt tự nhiên mà không tăng chi phí inference.
 
 **3. Thêm `"type": "segment_complete"` vào `_do_translate_segment()`:**
 
 ```python
 return json.dumps({
-    "type": "segment_complete",   # thêm dòng này
+    "type": "segment_complete",
     "english_words": en_words,
     "vietnamese_words": vi_words,
     ...
@@ -133,7 +140,9 @@ elif result.get("type") == "segment_complete":
     })
 ```
 
-`subtitle_controller.py` không cần thay đổi — đã relay tất cả events từ queue qua SSE.
+**`controllers/subtitle_controller.py` — đảm bảo flush ngay sau mỗi event:**
+
+Flask dev server trên Colab không có Gunicorn/gevent, nên không thể config worker class. Tuy nhiên cần đảm bảo generator dùng `stream_with_context` và không buffer. HTTP/1.1 SSE là single TCP stream — nếu một `segment` event có payload lớn, nó block các `word_partial` phía sau. Giải pháp: `word_partial` luôn được emit trước `segment` trong queue, và payload của nó nhỏ (<100 bytes) nên head-of-line blocking không đáng kể.
 
 ### Layer 3: Frontend TypeScript
 
@@ -152,7 +161,7 @@ export type RealtimeStreamEvent =
   | StreamDoneEvent
   | StreamErrorEvent
   | StreamSegmentErrorEvent
-  | WordPartialEvent;   // thêm vào union
+  | WordPartialEvent;
 ```
 
 **`src/app/pages/EditorPage.tsx` — state mới:**
@@ -165,21 +174,33 @@ const [inProgressWords, setInProgressWords] = useState<string[]>([]);
 
 ```typescript
 if (evt.type === "word_partial") {
-    setInProgressWords(prev => [...prev, evt.word]);
+    setInProgressWords(prev => {
+        const updated = [...prev, evt.word];
+        return updated.slice(-12);  // hard cap 12 từ — phòng segment_complete không đến
+    });
     return;
 }
 if (evt.type === "segment") {
-    setInProgressWords([]);  // clear in-progress khi segment hoàn chỉnh đến
+    setInProgressWords([]);  // clear khi segment hoàn chỉnh đến
     setEnglishWords(prev => [...prev, ...(evt.english_words ?? [])]);
     setVietnameseWords(prev => [...prev, ...(evt.vietnamese_words ?? [])]);
     return;
 }
 ```
 
+**Timeout fallback — tránh inProgressWords tích lũy vô hạn nếu VinAI timeout hoặc Colab crash:**
+
+```typescript
+useEffect(() => {
+    if (inProgressWords.length === 0) return;
+    const timer = setTimeout(() => setInProgressWords([]), 3000);
+    return () => clearTimeout(timer);
+}, [inProgressWords]);
+```
+
 **Subtitle line computation (~line 687) — thêm in-progress vào textEn:**
 
 ```typescript
-// Nếu đang stream và có inProgressWords → hiển thị chúng ở slot EN
 const textEnDisplay = inProgressWords.length > 0
     ? inProgressWords.join(" ")
     : textEn;
@@ -197,6 +218,7 @@ const textEnDisplay = inProgressWords.length > 0
 | Moshi decode từ tiếp theo | "Hello world" | (trống) |
 | Sau khi dịch xong (segment arrive) | "Hello world" (locked) | "Xin chào thế giới" |
 | Segment mới bắt đầu stream | "The next" | "Xin chào thế giới" (giữ nguyên) |
+| VinAI timeout 3s không respond | "" (cleared) | "Xin chào thế giới" (giữ nguyên) |
 
 Mode `vi-only` và `en-only`: không thay đổi hành vi hiện tại.
 
@@ -205,18 +227,22 @@ Mode `vi-only` và `en-only`: không thay đổi hành vi hiện tại.
 ## Scope
 
 **Trong scope:**
-- word_partial cho EN streaming
-- Trigger dịch sau 4 từ
-- In-progress state trên frontend cho dual modes
+- `word_partial` cho EN streaming (committed words only)
+- Flush trigger: 6 từ / punctuation / silence 0.4s / max 1.5s
+- `inProgressWords` state với hard cap 12 từ và 3s timeout
+- Backend relay `word_partial` qua SSE
 
 **Ngoài scope:**
-- Xử lý word correction (chấp nhận flicker)
+- Confidence-based filtering (moshi không expose confidence per token)
+- Word correction xử lý mịn (flicker tối thiểu chấp nhận được)
 - Thay đổi mode `vi-only` hay `en-only`
-- Thay đổi WebSocket reconnect logic
+- WebSocket reconnect logic
+- `frame_ts` sync sau reconnect
 
 ---
 
-## Risk
+## Known Limitations
 
-- `word_partial` gửi mỗi từ → tăng số WS message và SSE event lên đáng kể. Với tốc độ 3-5 từ/giây, thêm ~3-5 SSE event/giây — chấp nhận được.
-- Flush 4 từ thay vì chờ silence → câu bị cắt ngắn hơn, VinAI dịch cụm ngắn → có thể giảm chất lượng dịch đôi chút. Giảm thiểu bằng cách giữ điều kiện silence song song.
+- **frame_ts desync sau reconnect:** `frame_ts = frame_idx * 0.08` reset về 0 khi Colab restart. Frontend chưa dùng `frame_ts` để sync nên chưa là bug active — cần revisit nếu sau này cần timestamp-based sync.
+- **Flicker tối thiểu:** Từ cuối segment có ~15-25% xác suất bị moshi correction. Logic `rsplit(" ", 1)` đã chặn partial token nhưng không chặn full-word correction.
+- **Translation quality ở boundary:** Flush 6 từ vẫn có thể cắt giữa relative clause. Punctuation boundary giảm nhưng không loại bỏ hoàn toàn vấn đề này.
