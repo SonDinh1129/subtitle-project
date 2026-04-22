@@ -535,6 +535,15 @@ export function EditorPage() {
   }, [subtitleLang, vietnameseSubtitles, englishSubtitles, selectedSubId]);
 
   useEffect(() => {
+    if (subtitleDisplayMode === "en-only" || subtitleDisplayMode === "dual-en-top") {
+      setSubtitleLang("en");
+    } else if (subtitleDisplayMode === "vi-only" || subtitleDisplayMode === "dual-vi-top") {
+      setSubtitleLang("vi");
+    }
+    // "off" → giữ nguyên
+  }, [subtitleDisplayMode]);
+
+  useEffect(() => {
     setSubtitleAnchor((prev) => ({ ...prev, y: subtitlePosition === "bottom" ? 60 : 12 }));
   }, [subtitlePosition]);
 
