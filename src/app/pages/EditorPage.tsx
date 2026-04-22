@@ -711,10 +711,10 @@ export function EditorPage() {
 
   const isDualMode = subtitleDisplayMode === "dual-vi-top" || subtitleDisplayMode === "dual-en-top";
 
-  // Bypass time-based lookup CHỈ KHI đang streaming active.
+  // Bypass time-based lookup CHỈ KHI đang streaming active (mọi mode).
   // Khi stream xong hoặc user scrub lại, dùng time-based lookup bình thường
   // để subtitle đồng bộ với vị trí video.
-  const isLiveStreaming = isDualMode && isRealtimeMode && streamStatus === "streaming";
+  const isLiveStreaming = isRealtimeMode && streamStatus === "streaming";
   const textEnLive = isLiveStreaming
     ? inProgressWords.join(" ")
     : textEn;
@@ -727,9 +727,9 @@ export function EditorPage() {
       case "off":
         return [] as string[];
       case "en-only":
-        return textEn ? [textEn] : [];
+        return textEnLive ? [textEnLive] : [];
       case "vi-only":
-        return textVi ? [textVi] : [];
+        return textViLive ? [textViLive] : [];
       case "dual-vi-top":
         return [textViLive, textEnLive].filter(Boolean);
       case "dual-en-top":
