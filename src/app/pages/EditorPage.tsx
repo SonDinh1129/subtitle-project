@@ -452,7 +452,10 @@ export function EditorPage() {
         }
 
         if (evt.type === "segment") {
-          setInProgressWords([]);
+          const segWordCount = (evt.english_words ?? []).length;
+          // Xóa đúng số từ của segment này, giữ lại từ mới đã arrive sau flush.
+          // Tránh mất từ khi word_partial của câu tiếp theo đến trước segment event.
+          setInProgressWords((prev) => prev.slice(segWordCount));
           const enText = (evt.english_words ?? []).map((w) => w.word).join(" ");
           const viText = (evt.vietnamese_words ?? []).map((w) => w.word).join(" ");
           if (enText || viText) {
@@ -716,7 +719,9 @@ export function EditorPage() {
   // để subtitle đồng bộ với vị trí video.
   const isLiveStreaming = isRealtimeMode && streamStatus === "streaming" && isPlaying;
   const textEnLive = isLiveStreaming
-    ? inProgressWords.join(" ")
+    ? (inProgressWords.length > 0
+        ? inProgressWords.join(" ")
+        : (latestRealtimeSegment?.en ?? ""))  // gap-fill giữa segment và word_partial tiếp theo
     : textEn;
   const textViLive = isLiveStreaming
     ? (latestRealtimeSegment?.vi ?? "")
