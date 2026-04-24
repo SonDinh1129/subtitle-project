@@ -869,10 +869,10 @@ export function UploadPage() {
               <h3 className="text-sm text-violet-100 mb-4">{isVi ? "Vì sao chọn SubAI?" : "Why choose SubAI?"}</h3>
               <div className="space-y-3">
                 {[
-                  { icon: CheckCircle2, label: isVi ? "98,5% độ chính xác tiếng Anh" : "98.5% English accuracy" },
+                  { icon: CheckCircle2, label: isVi ? "Miễn phí để bắt đầu, không cần thẻ" : "Free to start, no credit card" },
                   { icon: Clock, label: isVi ? "Có kết quả trong dưới 2 phút" : "Results in under 2 min" },
-                  { icon: Languages, label: isVi ? "Mô hình chỉ tiếng Anh" : "English-only model" },
-                  { icon: Sparkles, label: isVi ? "Chỉnh sửa Realtime" : "Realtime editing workflow" },
+                  { icon: Zap, label: isVi ? "Nhanh hơn thủ công 36 lần" : "36× faster than manual" },
+                  { icon: Sparkles, label: isVi ? "Premium chỉ 99k₫/năm" : "Premium at 99k₫/year" },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center gap-2.5">
                     <item.icon className="w-4 h-4 text-violet-300 flex-shrink-0" />

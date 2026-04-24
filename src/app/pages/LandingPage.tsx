@@ -160,9 +160,9 @@ const pricingPlans = [
 
 const stats = [
   { value: "10M+", label: "Videos processed" },
-  { value: "98.5%", label: "Accuracy rate" },
-  { value: "EN", label: "Current model language" },
+  { value: "Free", label: "Start at no cost" },
   { value: "< 2min", label: "Avg. processing time" },
+  { value: "99k₫/yr", label: "Premium — less than 1 coffee/mo" },
 ];
 
 const docsItems = [
@@ -273,9 +273,9 @@ export function LandingPage() {
   const localizedStats = isVi
     ? [
         { value: "10M+", label: "Video đã xử lý" },
-        { value: "98.5%", label: "Độ chính xác" },
-        { value: "EN", label: "Ngôn ngữ mô hình hiện tại" },
+        { value: "Miễn phí", label: "Bắt đầu không tốn phí" },
         { value: "< 2 phút", label: "Thời gian xử lý trung bình" },
+        { value: "99k₫/năm", label: "Premium — chưa đến 1 ly cà phê/tháng" },
       ]
     : stats;
 
@@ -450,13 +450,13 @@ export function LandingPage() {
             <div className="absolute -left-6 top-1/2 -translate-y-1/2 hidden lg:block">
               <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-4 w-44">
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
+                    <Star className="w-4 h-4 text-amber-500" />
                   </div>
-                  <span className="text-sm text-gray-500">Accuracy</span>
+                  <span className="text-sm text-gray-500">Pricing</span>
                 </div>
-                <div className="text-2xl text-gray-900">98.5%</div>
-                <div className="text-xs text-green-600 mt-1">↑ Best in class</div>
+                <div className="text-2xl text-gray-900">99k₫/yr</div>
+                <div className="text-xs text-green-600 mt-1">↓ Free tier available</div>
               </div>
             </div>
             <div className="absolute -right-6 top-1/3 hidden lg:block">
