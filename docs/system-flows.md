@@ -13,17 +13,20 @@ Tất cả biểu đồ dưới đây viết bằng cú pháp Mermaid. Copy vào
 5. [UC-11: Truy cập trang Protected](#uc-11-truy-cập-trang-protected)
 6. [UC-12/13/15: Upload & Xử lý Normal Mode](#uc-121315-upload--xử-lý-normal-mode)
 7. [UC-14/16: Free User bị chặn (Realtime / Limit)](#uc-1416-free-user-bị-chặn)
-8. [UC-32/33: Upload & Xử lý Realtime Mode (Premium)](#uc-3233-upload--xử-lý-realtime-mode)
-9. [UC-17/18/19/20: Editor — Xem & Chỉnh sửa subtitle](#uc-17181920-editor)
-10. [UC-26/27: Download SRT](#uc-2627-download-srt)
-11. [UC-28: Export Video Burned Subtitle](#uc-28-export-video-burned-subtitle)
-12. [UC-29: Xem thông tin tài khoản](#uc-29-xem-thông-tin-tài-khoản)
-13. [UC-30: Đăng xuất](#uc-30-đăng-xuất)
-14. [UC-31/36: Nâng cấp Premium (PayOS)](#uc-3136-nâng-cấp-premium-payos)
-15. [UC-37: Colab VM2 xử lý ASR + MT (Normal)](#uc-37-colab-vm2-xử-lý-asr--mt-normal-mode)
-16. [UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-38-colab-vm2--vi-realtime-websocket-phowhisper)
-17. [UC-39: Health Check](#uc-39-health-check)
-18. [UC-40: Colab VM1 — EN Realtime WebSocket (Kyutai)](#uc-40-colab-vm1--en-realtime-websocket-kyutai)
+8. [UC-32/33A: Realtime — Upload & SSE Stream](#uc-3233a-realtime--upload--sse-stream)
+9. [UC-32/33B: Realtime — WebSocket Detail (EN / VI)](#uc-3233b-realtime--websocket-detail-en--vi)
+10. [UC-17: Editor — Tải & Hiển thị subtitle](#uc-17-editor--tải--hiển-thị-subtitle)
+11. [UC-18/19/20: Editor — Chỉnh sửa subtitle](#uc-181920-editor--chỉnh-sửa-subtitle)
+12. [UC-26/27: Download SRT](#uc-2627-download-srt)
+13. [UC-28: Export Video Burned Subtitle](#uc-28-export-video-burned-subtitle)
+14. [UC-29: Xem thông tin tài khoản](#uc-29-xem-thông-tin-tài-khoản)
+15. [UC-30: Đăng xuất](#uc-30-đăng-xuất)
+16. [UC-31: Tạo Order Nâng cấp Premium](#uc-31-tạo-order-nâng-cấp-premium)
+17. [UC-36: Webhook & Xác nhận Premium](#uc-36-webhook--xác-nhận-premium)
+18. [UC-37: Colab VM2 xử lý ASR + MT (Normal)](#uc-37-colab-vm2-xử-lý-asr--mt-normal-mode)
+19. [UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-38-colab-vm2--vi-realtime-websocket-phowhisper)
+20. [UC-39: Health Check](#uc-39-health-check)
+21. [UC-40: Colab VM1 — EN Realtime WebSocket (Kyutai)](#uc-40-colab-vm1--en-realtime-websocket-kyutai)
 
 ---
 
@@ -176,65 +179,37 @@ sequenceDiagram
 sequenceDiagram
     actor User
     participant FE as Frontend (UploadPage)
-    participant Flask as Flask Controller
-    participant Model as Model (Pipeline)
-    participant FFmpeg as FFmpeg (Local)
-    participant VAD as Silero VAD (Local)
-    participant VM2 as Colab VM2 — COLAB_URL
+    participant Flask as Flask Backend
+    participant Pipeline as Backend Pipeline
+    participant VM2 as Colab VM2
 
     User->>FE: Chọn file video + Normal mode + source_lang (en/vi)
-    FE->>FE: Validate file type, hiển thị preview
-
     FE->>Flask: POST /api/upload (FormData + JWT)
-    Flask->>Flask: require_auth: decode JWT
-    Flask->>Flask: get_profile() → check free limit
+    Flask->>Flask: Xác thực JWT, kiểm tra quota
     alt videos_used >= 5 và không phải premium
         Flask-->>FE: 403 { error: "Monthly limit reached" }
-        FE-->>User: Hiển thị thông báo + gợi ý upgrade
+        FE-->>User: Thông báo giới hạn + gợi ý upgrade
     else Còn quota
-        Flask->>Model: create_job(filename, user_id, source_lang)
-        Flask->>Model: Lưu file video vào uploads/
-        Flask->>Model: increment_video_count (Supabase RPC)
-
-        Flask->>Model: Start thread: run_pipeline(job_id, colab_url)
+        Flask->>Pipeline: Tạo job, lưu file, increment_video_count
+        Flask->>Pipeline: Start thread: run_pipeline(job_id)
         Flask-->>FE: 200 { job_id, status: "queued" }
-
         FE->>FE: setState("processing")
 
         par Pipeline chạy trong background
-            Model->>Model: update_job(status: "extracting", progress: 5)
-            Model->>FFmpeg: Extract audio → WAV 16kHz mono
-            FFmpeg-->>Model: audio.wav
-
-            Model->>Model: update_job(status: "vad", progress: 20)
-            Model->>VAD: detect_speech_segments(audio.wav)
-            VAD-->>Model: segments [{start, end}, ...]
-            Model->>Model: split_long_segment(max=25s)
-            Model->>Model: merge_short_segments(min=2.0s)
-
-            Model->>Model: update_job(status: "transcribing", progress: 40)
-            Model->>Model: encode_segments_for_colab (base64)
-            Model->>VM2: POST /transcribe_translate { segments, mode, source_lang }
-            VM2->>VM2: Faster-Whisper/PhoWhisper ASR + VinAI MT (nếu EN)
-            VM2-->>Model: { english_words, vietnamese_words, texts }
-
-            Model->>Model: update_job(status: "generating", progress: 80)
-            Model->>Model: words_to_srt_string → save SRT files
-
-            Model->>Model: update_job(status: "done", progress: 100)
-            Model->>Model: Cleanup: xóa audio.wav temp
+            Pipeline->>Pipeline: Extract audio → VAD → segment
+            Pipeline->>VM2: POST /transcribe_translate { segments, source_lang }
+            VM2-->>Pipeline: { english_words, vietnamese_words }
+            Pipeline->>Pipeline: Tạo SRT files, cleanup
         and Frontend poll
             loop Mỗi 1.5 giây cho đến khi done/error
                 FE->>Flask: GET /api/jobs/{id} (+ JWT)
-                Flask->>Model: get_job(id)
-                Model-->>Flask: { status, progress }
-                Flask-->>FE: { status, progress, words... }
-                FE-->>User: Cập nhật progress bar + message
+                Flask-->>FE: { status, progress }
+                FE-->>User: Cập nhật progress bar
             end
         end
 
         FE->>FE: Lưu job vào sessionStorage
-        FE-->>User: Hiển thị "Hoàn tất" + nút "Open Editor"
+        FE-->>User: "Hoàn tất" + nút "Open Editor"
         User->>FE: Click "Open Editor"
         FE-->>User: navigate("/editor")
     end
@@ -271,84 +246,76 @@ sequenceDiagram
 
 ---
 
-## UC-32/33: Upload & Xử lý Realtime Mode
+## UC-32/33A: Realtime — Upload & SSE Stream
 
 ```mermaid
 sequenceDiagram
     actor User
     participant FE as Frontend (Upload → Editor)
-    participant Flask as Flask Controller
-    participant Model as Model (Pipeline)
-    participant FFmpeg as FFmpeg (inline stream)
-    participant VM1 as Colab VM1 — Kyutai (EN)
-    participant VM2 as Colab VM2 — PhoWhisper (VI)
+    participant Flask as Flask Backend
+    participant Pipeline as Backend Pipeline
 
-    User->>FE: Chọn file video + Realtime mode + source_lang (en/vi) [Premium]
-    FE->>Flask: POST /api/upload (mode="realtime", source_lang + JWT)
-    Flask->>Flask: require_auth → check is_premium = true
-    Flask->>Model: create_job(user_id, source_lang), save file
-    Flask->>Model: Start thread: run_pipeline_realtime(job_id, colab_url, colab_realtime_url)
+    User->>FE: Chọn video + Realtime mode + source_lang [Premium]
+    FE->>Flask: POST /api/upload (mode="realtime" + JWT)
+    Flask->>Flask: Xác thực JWT, kiểm tra is_premium
+    Flask->>Pipeline: Tạo job, lưu file
+    Flask->>Pipeline: Start thread: run_pipeline_realtime(job_id)
     Flask-->>FE: 200 { job_id, status: "queued" }
 
     FE->>FE: Lưu sessionStorage, navigate("/editor?mode=realtime")
-    Note over User: Redirect NGAY sang Editor, không chờ
+    Note over User: Redirect NGAY sang Editor, không chờ xử lý
 
     FE->>Flask: GET /api/jobs/{id}/stream?token=JWT (EventSource)
-    Flask-->>FE: SSE stream opened
-    Flask-->>FE: event: { type: "snapshot", status, progress, words }
+    Flask-->>FE: SSE stream opened + snapshot
 
-    par Pipeline chạy trong background thread
-        Model->>Model: update_job(status: "transcribing", progress: 10)
-
-        alt source_lang == "en"
-            Model->>Model: AudioStreamProducer(video, 24kHz, 80ms/frame)
-            Model->>VM1: WebSocket connect wss://vm1/ws/transcribe_kyutai
-            loop Mỗi 80ms frame
-                Model->>VM1: send { pcm_base64, frame_index }
-                VM1->>VM1: Kyutai stt-1b-en_fr: decode token
-                alt Từ mới xuất hiện
-                    VM1->>VM1: Accumulate words → flush khi pause > 1.5s hoặc > 8s
-                    VM1->>VM1: VinAI EN→VI translate segment
-                    VM1-->>Model: WS response { english_words, vietnamese_words, english_text, vietnamese_text }
-                end
-            end
-            Model->>VM1: send { type: "END" }
-        else source_lang == "vi"
-            Model->>Model: AudioStreamProducer(video, 16kHz, 32ms/frame)
-            Model->>VM2: WebSocket connect wss://vm2/ws/transcribe_vi_realtime
-            loop Mỗi 32ms frame
-                Model->>VM2: send { pcm_base64, frame_index }
-                VM2->>VM2: Silero VAD detect speech
-                alt Speech segment detected
-                    VM2->>VM2: PhoWhisper-large transcribe VI
-                    VM2-->>Model: WS response { vietnamese_words, vietnamese_text }
-                end
-            end
-            Model->>VM2: send { type: "END" }
-        end
-
-        loop Mỗi segment nhận từ WS
-            Model->>Model: Append words, update_job(progress: 10-90%)
-            Model->>Model: emit_job_event({ type: "segment", index, words })
-            Flask-->>FE: SSE event: { type: "segment", index, progress, english_words, vietnamese_words }
-            FE->>FE: Append subtitle vào editor
-            FE-->>User: Subtitle mới xuất hiện trên màn hình
-        end
-
-        Model->>Model: Generate SRT files (progress: 90%)
-        Model->>Model: update_job(status: "done", progress: 100%)
-        Model->>Model: emit_job_event({ type: "done" })
-        Model->>Model: cleanup video file
+    loop Mỗi segment nhận từ Pipeline
+        Pipeline->>Flask: emit_job_event({ type: "segment", words })
+        Flask-->>FE: SSE: { type: "segment", english_words, vietnamese_words }
+        FE->>FE: Append subtitle vào editor
+        FE-->>User: Subtitle mới xuất hiện
     end
 
-    Flask-->>FE: SSE event: { type: "done", progress: 100 }
-    FE->>FE: stream.close(), setStreamStatus("done")
+    Flask-->>FE: SSE: { type: "done", progress: 100 }
+    FE->>FE: stream.close()
     FE-->>User: "Processing Complete!"
 ```
 
 ---
 
-## UC-17/18/19/20: Editor
+## UC-32/33B: Realtime — WebSocket Detail (EN / VI)
+
+```mermaid
+sequenceDiagram
+    participant Pipeline as Backend Pipeline
+    participant VM1 as Colab VM1 — Kyutai (EN)
+    participant VM2 as Colab VM2 — PhoWhisper (VI)
+
+    alt source_lang == "en"
+        Pipeline->>VM1: WebSocket connect (24kHz, 80ms/frame)
+        loop Mỗi 80ms frame
+            Pipeline->>VM1: send { pcm_base64, frame_index }
+            alt Flush khi pause > 1.5s hoặc duration > 8s
+                VM1->>VM1: Kyutai ASR + VinAI EN→VI translate
+                VM1-->>Pipeline: { english_words, vietnamese_words }
+            end
+        end
+        Pipeline->>VM1: send { type: "END" }
+    else source_lang == "vi"
+        Pipeline->>VM2: WebSocket connect (16kHz, 32ms/frame)
+        loop Mỗi 32ms frame
+            Pipeline->>VM2: send { pcm_base64, frame_index }
+            alt Speech segment detected (Silero VAD)
+                VM2->>VM2: PhoWhisper-large transcribe VI
+                VM2-->>Pipeline: { vietnamese_words }
+            end
+        end
+        Pipeline->>VM2: send { type: "END" }
+    end
+```
+
+---
+
+## UC-17: Editor — Tải & Hiển thị subtitle
 
 ```mermaid
 sequenceDiagram
@@ -356,23 +323,33 @@ sequenceDiagram
     participant FE as Frontend (EditorPage)
     participant SS as SessionStorage
 
-    Note over User,SS: UC-17: Mở Editor & Xem video với subtitle
     User->>FE: Navigate /editor
     FE->>SS: getItem("currentJob")
     alt currentJob === null
         FE-->>User: Redirect /upload
     else Có job data
         SS-->>FE: { job_id, english_words, vietnamese_words }
-        FE->>FE: buildYouTubeCaptions(words) → CaptionSegment[]
+        FE->>FE: buildYouTubeCaptions() → CaptionSegment[]
         FE->>FE: mapWordsToUiSubtitles() → Subtitle[]
-        FE->>SS: Check draft: getItem("draft_{job_id}_en/vi")
+        FE->>SS: Check draft: getItem("draft_{job_id}")
         alt Có draft
             SS-->>FE: Dùng draft subtitles (user đã sửa trước đó)
         else Không có draft
             FE->>FE: Dùng subtitles từ job data
         end
-        FE-->>User: Render video player + subtitle list + timeline
+        FE-->>User: Render video player + subtitle list
     end
+```
+
+---
+
+## UC-18/19/20: Editor — Chỉnh sửa subtitle
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant FE as Frontend (EditorPage)
+    participant SS as SessionStorage
 
     Note over User,SS: UC-18: Chuyển đổi hiển thị subtitle
     User->>FE: Chọn mode (Off / EN-only / VI-only / Dual)
@@ -381,9 +358,8 @@ sequenceDiagram
 
     Note over User,SS: UC-19: Chỉnh sửa subtitle text
     User->>FE: Click vào subtitle → sửa nội dung
-    FE->>FE: Push current state → undoStack
-    FE->>FE: Update subtitle text
-    FE->>SS: setItem("draft_{job_id}_{lang}", subtitles)
+    FE->>FE: Push undoStack, update subtitle text
+    FE->>SS: Lưu draft_{job_id}_{lang}
     FE-->>User: Preview cập nhật ngay lập tức
 
     Note over User,SS: UC-20: Chỉnh sửa timestamp
@@ -506,7 +482,7 @@ sequenceDiagram
 
 ---
 
-## UC-31/36: Nâng cấp Premium (PayOS)
+## UC-31: Tạo Order Nâng cấp Premium
 
 ```mermaid
 sequenceDiagram
@@ -516,50 +492,52 @@ sequenceDiagram
     participant DB as Supabase DB
     participant PayOS as PayOS Gateway
 
-    Note over User,PayOS: Bước 1: Tạo order
     User->>FE: Click "Nâng cấp 99.000đ"
     FE->>Flask: POST /api/payment/create-order (+ JWT)
-    Flask->>Flask: require_auth, get_profile()
+    Flask->>Flask: Xác thực JWT, kiểm tra is_premium
     alt Đã là Premium
         Flask-->>FE: 400 { error: "Already premium" }
         FE-->>User: "Bạn đã là Premium!"
     else Chưa Premium
-        Flask->>DB: INSERT payments (user_id, order_id, amount=99000, status="pending")
-        Flask->>PayOS: Create payment link (amount, returnUrl, cancelUrl)
+        Flask->>DB: INSERT payments (status="pending", amount=99000)
+        Flask->>PayOS: Tạo payment link (amount, returnUrl, cancelUrl)
         PayOS-->>Flask: { checkoutUrl }
         Flask-->>FE: 200 { payment_url }
-        FE-->>User: window.location.href = payment_url
+        FE-->>User: Redirect sang trang thanh toán PayOS
+        User->>PayOS: Thanh toán (QR / Banking / Ví điện tử)
+        PayOS-->>User: Redirect về /upgrade/success
     end
+```
 
-    Note over User,PayOS: Bước 2: User thanh toán
-    User->>PayOS: Mở trang thanh toán
-    User->>PayOS: Thanh toán qua QR / Momo / ZaloPay / Banking
-    PayOS-->>User: Redirect về /upgrade/success
+---
 
-    Note over User,PayOS: Bước 3: Webhook xác nhận (server-to-server)
+## UC-36: Webhook & Xác nhận Premium
+
+```mermaid
+sequenceDiagram
+    participant PayOS as PayOS Gateway
+    participant Flask as Flask Backend
+    participant DB as Supabase DB
+    actor User
+    participant FE as Frontend (/upgrade/success)
+
+    Note over PayOS,Flask: Server-to-server webhook
     PayOS->>Flask: POST /api/payment/webhook { orderCode, status, signature }
-    Flask->>Flask: verify_payos_signature(payload, CHECKSUM_KEY)
+    Flask->>Flask: verify_payos_signature(CHECKSUM_KEY)
     alt Signature không hợp lệ
         Flask-->>PayOS: 400 { error: "Invalid signature" }
-    else Signature OK
-        Flask->>DB: SELECT payments WHERE payos_order_id = orderCode
-        alt Đã xử lý (status = "paid")
-            Flask-->>PayOS: 200 OK (idempotent, bỏ qua)
-        else status != "PAID"
-            Flask->>DB: UPDATE payments SET status = "cancelled"
-            Flask-->>PayOS: 200 OK
-        else Thanh toán thành công
-            Flask->>DB: UPDATE payments SET status = "paid", paid_at = now()
-            Flask->>DB: UPDATE profiles SET premium_until = "9999-12-31"
-            Flask-->>PayOS: 200 OK
-        end
+    else Signature OK + thanh toán thành công
+        Flask->>DB: UPDATE payments SET status = "paid"
+        Flask->>DB: UPDATE profiles SET premium_until = "9999-12-31"
+        Flask-->>PayOS: 200 OK
+    else Đã xử lý hoặc bị huỷ
+        Flask->>DB: UPDATE payments SET status = "cancelled" (nếu cần)
+        Flask-->>PayOS: 200 OK
     end
 
-    Note over User,PayOS: Bước 4: Frontend xác nhận
-    FE->>FE: Trang /upgrade/success mount
+    Note over User,FE: Frontend xác nhận sau redirect
     loop Poll tối đa 10 lần, mỗi 2 giây
         FE->>Flask: GET /api/auth/me (+ JWT)
-        Flask->>DB: get_profile(user_id)
         Flask-->>FE: { is_premium: true/false }
         alt is_premium === true
             FE->>FE: refreshProfile() → update AuthContext
@@ -567,7 +545,7 @@ sequenceDiagram
             FE-->>User: navigate("/upload")
         end
     end
-    Note over FE: Nếu timeout: "Thanh toán đang xử lý, vui lòng chờ"
+    Note over FE: Timeout → "Thanh toán đang xử lý, vui lòng chờ"
 ```
 
 ---
@@ -798,13 +776,16 @@ flowchart TB
 | UC-11 | Protected Route | Guest, AuthContext |
 | UC-12/13/15 | Upload Normal | Free/Premium User, Flask, Colab |
 | UC-14/16 | Bị chặn (limit) | Free User, Flask |
-| UC-32/33 | Upload Realtime | Premium User, Flask, Colab |
-| UC-17-20 | Editor | Free/Premium User |
+| UC-32/33A | Realtime — Upload & SSE | Premium User, Flask, Pipeline |
+| UC-32/33B | Realtime — WebSocket Detail | Pipeline, Colab VM1, Colab VM2 |
+| UC-17 | Editor — Tải subtitle | Free/Premium User |
+| UC-18/19/20 | Editor — Chỉnh sửa | Free/Premium User |
 | UC-26/27 | Download SRT | Free/Premium User, Flask |
 | UC-28 | Export Video | Free/Premium User, Flask, FFmpeg |
 | UC-29 | Xem tài khoản | Free/Premium User, Flask, Supabase |
 | UC-30 | Đăng xuất | Free/Premium User, Supabase |
-| UC-31/36 | Nâng cấp Premium | Free User, Flask, PayOS, Supabase |
+| UC-31 | Tạo Order Premium | Free User, Flask, PayOS |
+| UC-36 | Webhook & Xác nhận | PayOS, Flask, Supabase, Frontend |
 | UC-37 | Colab VM2 — Normal ASR+MT | Flask, VM2, Faster-Whisper/PhoWhisper, VinAI |
 | UC-38 | Colab VM2 — VI Realtime WS | Flask, VM2, Silero VAD, PhoWhisper-large |
 | UC-39 | Health Check | Flask, VM1, VM2, Silero VAD |
