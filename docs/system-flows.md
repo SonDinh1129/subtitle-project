@@ -48,17 +48,24 @@ sequenceDiagram
         FE->>SB: signUp({ email, password, data: { full_name } })
         SB->>DB: INSERT auth.users
         DB->>DB: Trigger: INSERT profiles (id, email, full_name)
-        SB->>Email: Gửi confirmation email
+        SB->>Email: Gửi email chứa mã OTP 6 số
         SB-->>FE: { user, identities }
         alt identities.length === 0
             FE-->>User: "Email đã tồn tại"
         else Email chưa tồn tại
-            FE-->>User: "Kiểm tra email để xác nhận tài khoản"
-            User->>Email: Mở email, click link xác nhận
-            Email->>SB: Confirm email
-            SB->>FE: onAuthStateChange(SIGNED_IN, session)
-            FE->>FE: setUser(session.user), fetchProfile()
-            FE-->>User: Redirect /upload
+            FE-->>User: Hiển thị màn hình nhập OTP (step: 'otp')
+            User->>Email: Mở email, lấy mã OTP 6 số
+            User->>FE: Nhập mã OTP
+            FE->>SB: verifyOtp({ email, token, type: 'signup' })
+            alt OTP sai hoặc hết hạn
+                SB-->>FE: { error }
+                FE-->>User: "Mã OTP không hợp lệ hoặc đã hết hạn"
+            else OTP hợp lệ
+                SB->>SB: Xác minh email, tạo session
+                SB->>FE: onAuthStateChange(SIGNED_IN, session)
+                FE->>FE: setUser(session.user), fetchProfile()
+                FE-->>User: Redirect /upload
+            end
         end
     end
 ```
@@ -129,17 +136,32 @@ sequenceDiagram
     participant SB as Supabase Auth
     participant Email as Email Provider
 
-    User->>FE: Nhập email
-    FE->>SB: resetPasswordForEmail(email, { redirectTo: '/reset-password' })
-    SB->>Email: Gửi email chứa link reset
+    User->>FE: Nhập email (step: 'form')
+    FE->>SB: resetPasswordForEmail(email)
+    SB->>Email: Gửi email chứa mã OTP 6 số
     SB-->>FE: { success }
-    FE-->>User: "Kiểm tra email để đặt lại mật khẩu"
-    User->>Email: Click link reset password
-    Email-->>User: Redirect về app với recovery token
-    User->>FE: Nhập mật khẩu mới
-    FE->>SB: updateUser({ password: newPassword })
-    SB-->>FE: { user }
-    FE-->>User: "Mật khẩu đã được cập nhật", redirect /signin
+    FE-->>User: Hiển thị màn hình nhập OTP (step: 'otp')
+    User->>Email: Mở email, lấy mã OTP 6 số
+    User->>FE: Nhập mã OTP
+    FE->>SB: verifyOtp({ email, token, type: 'recovery' })
+    alt OTP sai hoặc hết hạn
+        SB-->>FE: { error }
+        FE-->>User: "Mã OTP không hợp lệ hoặc đã hết hạn"
+    else OTP hợp lệ
+        SB->>SB: Tạo recovery session (implicit login)
+        SB->>FE: onAuthStateChange(SIGNED_IN, session)
+        FE-->>User: Hiển thị màn hình đặt mật khẩu mới (step: 'new-password')
+        User->>FE: Nhập mật khẩu mới + xác nhận
+        FE->>FE: Validate (>= 8 chars, khớp nhau)
+        FE->>SB: updateUser({ password: newPassword })
+        alt updateUser thất bại
+            SB-->>FE: { error }
+            FE-->>User: Hiển thị lỗi, giữ nguyên step 'new-password'
+        else Thành công
+            SB-->>FE: { user }
+            FE-->>User: Redirect /upload
+        end
+    end
 ```
 
 ---

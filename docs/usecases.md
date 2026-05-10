@@ -41,13 +41,13 @@ Guest → Đăng ký/Đăng nhập → Free User
 | UC-01 | Xem Landing Page | Xem giới thiệu, tính năng, pricing, docs |
 | UC-02 | Chuyển đổi ngôn ngữ UI | Chuyển giữa Tiếng Việt / English |
 | UC-03 | Chuyển đổi theme | Chuyển giữa Light / Dark mode |
-| UC-04 | Đăng ký bằng email | Nhập name, email, password → nhận email xác nhận |
+| UC-04 | Đăng ký bằng email | Nhập name, email, password → nhận mã OTP 6 số qua email → nhập OTP để xác minh → redirect /upload |
 | UC-05 | Đăng ký bằng Google OAuth | Redirect Google → tạo tài khoản → redirect /upload |
 | UC-06 | Đăng ký bằng GitHub OAuth | Redirect GitHub → tạo tài khoản → redirect /upload |
 | UC-07 | Đăng nhập bằng email | Nhập email + password → redirect /upload |
 | UC-08 | Đăng nhập bằng Google | OAuth flow → redirect /upload |
 | UC-09 | Đăng nhập bằng GitHub | OAuth flow → redirect /upload |
-| UC-10 | Quên mật khẩu | Nhập email → nhận link reset password |
+| UC-10 | Quên mật khẩu | Nhập email → nhận mã OTP 6 số qua email → nhập OTP → đặt mật khẩu mới → redirect /upload |
 | UC-11 | Truy cập trang protected | Truy cập /upload hoặc /editor khi chưa login → redirect /signin |
 
 ---
