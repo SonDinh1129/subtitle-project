@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
-import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2, Mail, RefreshCw } from "lucide-react";
 import { AuthRightPanel } from "../components/AuthRightPanel";
 import { useUiPreferences } from "../context/UiPreferencesContext";
 import { supabase, signInWithGoogle } from "../../lib/supabase";
@@ -71,7 +71,11 @@ export function SignUpPage() {
   const [oauthLoading, setOauthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
-  const [signUpSuccess, setSignUpSuccess] = useState(false);
+  const [step, setStep] = useState<'form' | 'otp'>('form');
+  const [otp, setOtp] = useState("");
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
   const [errors, setErrors] = useState<{
     fullName?: string;
     email?: string;
@@ -100,6 +104,51 @@ export function SignUpPage() {
     }
   };
 
+  const startResendCountdown = () => {
+    setResendCountdown(60);
+    const iv = setInterval(() => {
+      setResendCountdown((c) => {
+        if (c <= 1) { clearInterval(iv); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otp.trim()) {
+      setOtpError(isVi ? "Vui lòng nhập mã OTP" : "Please enter the OTP code");
+      return;
+    }
+    setOtpError(null);
+    setOtpLoading(true);
+    try {
+      const { error } = await supabase.auth.verifyOtp({ email, token: otp, type: 'signup' });
+      if (error) {
+        setOtpError(isVi ? "Mã OTP không hợp lệ hoặc đã hết hạn." : "Invalid or expired OTP code.");
+      }
+      // On success Supabase auto-navigates via AuthContext session change → no explicit redirect needed
+    } catch {
+      setOtpError(isVi ? "Đã xảy ra lỗi, vui lòng thử lại." : "An error occurred, please try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendSignup = async () => {
+    if (resendCountdown > 0) return;
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email });
+      if (error && error.status === 429) {
+        setOtpError(isVi ? "Quá nhiều yêu cầu, vui lòng thử lại sau." : "Too many requests, please try again later.");
+        return;
+      }
+      startResendCountdown();
+    } catch {
+      // best-effort resend, ignore error
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors = validate();
@@ -117,11 +166,16 @@ export function SignUpPage() {
         options: { data: { full_name: fullName } },
       });
       if (error) {
-        setAuthError(error.message);
+        if (error.status === 429) {
+          setAuthError(isVi ? "Quá nhiều yêu cầu, vui lòng thử lại sau." : "Too many requests, please try again later.");
+        } else {
+          setAuthError(error.message);
+        }
       } else if (data.user && data.user.identities && data.user.identities.length === 0) {
         setAuthError(isVi ? "Email này đã được đăng ký. Vui lòng đăng nhập." : "This email is already registered. Please sign in.");
       } else {
-        setSignUpSuccess(true);
+        setStep('otp');
+        startResendCountdown();
       }
     } catch {
       setAuthError(isVi ? "Đã xảy ra lỗi, vui lòng thử lại" : "An error occurred, please try again");
@@ -130,25 +184,100 @@ export function SignUpPage() {
     }
   };
 
-  if (signUpSuccess) {
+  if (step === 'otp') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-        <div className="max-w-md w-full mx-4 text-center px-6">
-          <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+      <div className="min-h-screen flex bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+        <div className="flex-1 flex flex-col justify-center items-center px-6 py-12 lg:max-w-[52%]">
+          <div className="w-full max-w-[420px]">
+            <Link to="/" className="inline-flex items-center gap-2.5 group mb-10">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200">
+                <Captions className="w-4.5 h-4.5 text-white" />
+              </div>
+              <span className="text-gray-900 dark:text-gray-100 tracking-tight">
+                <span className="text-violet-600">Sub</span>AI
+              </span>
+            </Link>
+
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+              <div className="w-12 h-12 rounded-2xl bg-violet-50 flex items-center justify-center mb-5">
+                <Mail className="w-6 h-6 text-violet-600" />
+              </div>
+              <h1 className="text-gray-900 dark:text-gray-100 mb-1.5" style={{ fontSize: "1.625rem", fontWeight: 700, lineHeight: 1.25 }}>
+                {isVi ? "Xác minh email" : "Verify your email"}
+              </h1>
+              <p className="text-gray-500 mb-2" style={{ fontSize: "0.9375rem" }}>
+                {isVi ? "Chúng tôi đã gửi mã 6 số đến" : "We sent a 6-digit code to"}
+              </p>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-100 mb-6">
+                <Mail className="w-4 h-4 text-violet-500" />
+                <span className="text-violet-700" style={{ fontSize: "0.9375rem", fontWeight: 600 }}>{email}</span>
+              </div>
+
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div>
+                  <label className="block text-gray-700 mb-1.5" style={{ fontSize: "0.875rem", fontWeight: 500 }}>
+                    {isVi ? "Mã xác minh" : "Verification Code"}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="123456"
+                    value={otp}
+                    onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '')); setOtpError(null); }}
+                    className={`w-full px-4 py-2.5 rounded-xl border bg-white text-gray-900 placeholder-gray-400 outline-none transition-all tracking-widest text-center text-lg
+                      ${otpError
+                        ? "border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                        : "border-gray-200 hover:border-gray-300 focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+                      }`}
+                  />
+                  {otpError && <p className="mt-1.5 text-red-500" style={{ fontSize: "0.8125rem" }}>{otpError}</p>}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={otpLoading}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-violet-200"
+                  style={{ fontSize: "0.9375rem", fontWeight: 600 }}
+                >
+                  {otpLoading ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      {isVi ? "Đang xác minh..." : "Verifying..."}
+                    </>
+                  ) : (
+                    <>
+                      {isVi ? "Xác minh" : "Verify"}
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <button
+                onClick={handleResendSignup}
+                disabled={resendCountdown > 0}
+                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                style={{ fontSize: "0.9375rem", fontWeight: 500 }}
+              >
+                <RefreshCw className="w-4 h-4" />
+                {resendCountdown > 0
+                  ? (isVi ? `Gửi lại sau ${resendCountdown}s` : `Resend in ${resendCountdown}s`)
+                  : (isVi ? "Gửi lại mã" : "Resend code")}
+              </button>
+
+              <p className="mt-6 text-center text-gray-500" style={{ fontSize: "0.875rem" }}>
+                <button onClick={() => setStep('form')} className="text-violet-600 hover:text-violet-700 font-semibold">
+                  {isVi ? "← Dùng email khác" : "← Use different email"}
+                </button>
+              </p>
+            </motion.div>
           </div>
-          <h2 className="text-xl font-bold mb-2">
-            {isVi ? "Kiểm tra email của bạn!" : "Check your email!"}
-          </h2>
-          <p className="text-gray-500 mb-6" style={{ fontSize: "0.9375rem" }}>
-            {isVi
-              ? `Chúng tôi đã gửi link xác nhận đến ${email}. Vui lòng kiểm tra và nhấp vào link để hoàn tất đăng ký.`
-              : `We sent a confirmation link to ${email}. Please check your inbox and click the link to complete registration.`}
-          </p>
-          <Link to="/signin" className="text-violet-600 hover:text-violet-700 font-semibold">
-            {isVi ? "Quay lại đăng nhập" : "Back to Sign In"}
-          </Link>
         </div>
+        <AuthRightPanel />
       </div>
     );
   }
