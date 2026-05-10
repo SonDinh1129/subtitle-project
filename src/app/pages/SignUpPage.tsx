@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
 import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2, Mail, RefreshCw } from "lucide-react";
@@ -83,6 +83,14 @@ export function SignUpPage() {
     agreed?: string;
   }>({});
 
+  const resendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
+    };
+  }, []);
+
   const validate = () => {
     const e: typeof errors = {};
     if (!fullName.trim()) e.fullName = isVi ? "Họ và tên là bắt buộc" : "Full name is required";
@@ -105,10 +113,14 @@ export function SignUpPage() {
   };
 
   const startResendCountdown = () => {
+    if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
     setResendCountdown(60);
-    const iv = setInterval(() => {
+    resendIntervalRef.current = setInterval(() => {
       setResendCountdown((c) => {
-        if (c <= 1) { clearInterval(iv); return 0; }
+        if (c <= 1) {
+          if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
+          return 0;
+        }
         return c - 1;
       });
     }, 1000);
@@ -270,7 +282,14 @@ export function SignUpPage() {
               </button>
 
               <p className="mt-6 text-center text-gray-500" style={{ fontSize: "0.875rem" }}>
-                <button onClick={() => setStep('form')} className="text-violet-600 hover:text-violet-700 font-semibold">
+                <button onClick={() => {
+                  if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
+                  setStep('form');
+                  setOtp('');
+                  setOtpError(null);
+                  setOtpLoading(false);
+                  setResendCountdown(0);
+                }} className="text-violet-600 hover:text-violet-700 font-semibold">
                   {isVi ? "← Dùng email khác" : "← Use different email"}
                 </button>
               </p>
@@ -488,7 +507,6 @@ export function SignUpPage() {
                           ? "border-red-400 bg-white"
                           : "border-gray-300 bg-white group-hover:border-violet-400"
                       }`}
-                    onClick={() => { setAgreed(!agreed); setErrors((p) => ({ ...p, agreed: undefined })); }}
                   >
                     {agreed && (
                       <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 12 10" fill="none">
