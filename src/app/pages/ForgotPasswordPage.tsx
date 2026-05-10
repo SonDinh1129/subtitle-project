@@ -77,8 +77,12 @@ export function ForgotPasswordPage() {
   const handleResend = async () => {
     if (countdown > 0) return;
     setIsLoading(true);
-    await supabase.auth.resetPasswordForEmail(email);
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
     setIsLoading(false);
+    if (error && error.status === 429) {
+      setOtpError(isVi ? "Quá nhiều yêu cầu, vui lòng thử lại sau." : "Too many requests, please try again later.");
+      return;
+    }
     startCountdown();
   };
 
@@ -95,6 +99,7 @@ export function ForgotPasswordPage() {
       if (error) {
         setOtpError(isVi ? "Mã OTP không hợp lệ hoặc đã hết hạn." : "Invalid or expired OTP code.");
       } else {
+        setOtp("");
         setStage("new-password");
       }
     } catch {
