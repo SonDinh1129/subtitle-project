@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2, Mail, RefreshCw } from "lucide-react";
 import { AuthRightPanel } from "../components/AuthRightPanel";
@@ -62,6 +62,7 @@ function PasswordStrength({ password, isVi }: { password: string; isVi: boolean 
 export function SignUpPage() {
   const { language } = useUiPreferences();
   const isVi = language === "vi";
+  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -138,8 +139,9 @@ export function SignUpPage() {
       const { error } = await supabase.auth.verifyOtp({ email, token: otp, type: 'signup' });
       if (error) {
         setOtpError(isVi ? "Mã OTP không hợp lệ hoặc đã hết hạn." : "Invalid or expired OTP code.");
+      } else {
+        navigate("/upload", { replace: true });
       }
-      // On success Supabase auto-navigates via AuthContext session change → no explicit redirect needed
     } catch {
       setOtpError(isVi ? "Đã xảy ra lỗi, vui lòng thử lại." : "An error occurred, please try again.");
     } finally {

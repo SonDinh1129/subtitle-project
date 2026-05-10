@@ -180,8 +180,8 @@ export function ForgotPasswordPage() {
                 </h1>
                 <p className="text-gray-500 mb-8" style={{ fontSize: "0.9375rem", lineHeight: 1.6 }}>
                   {isVi
-                    ? "Nhập email gắn với workspace phụ đề tiếng Anh, chúng tôi sẽ gửi liên kết đặt lại cho bạn."
-                    : "Enter the email associated with your English subtitle workspace and we'll send you a reset link."}
+                    ? "Nhập email gắn với tài khoản của bạn, chúng tôi sẽ gửi mã OTP để đặt lại mật khẩu."
+                    : "Enter the email associated with your account and we'll send you an OTP code to reset your password."}
                 </p>
 
                 {/* Form */}
@@ -240,8 +240,8 @@ export function ForgotPasswordPage() {
                   </div>
                   <p className="text-blue-700" style={{ fontSize: "0.8125rem", lineHeight: 1.6 }}>
                     {isVi
-                      ? "Chúng tôi sẽ gửi liên kết đặt lại vào hộp thư của bạn. Hãy kiểm tra cả mục spam nếu chưa thấy trong 1 phút."
-                      : "We'll send a reset link to your inbox. Check spam if you do not see it within a minute."}
+                      ? "Chúng tôi sẽ gửi mã OTP 6 số đến email của bạn. Hãy kiểm tra cả mục spam nếu chưa thấy trong 1 phút."
+                      : "We'll send a 6-digit OTP code to your email. Check spam if you do not see it within a minute."}
                   </p>
                 </div>
 
