@@ -103,3 +103,28 @@ def change_password():
         from flask import current_app
         current_app.logger.exception("change_password failed for user %s", g.user_id)
         return jsonify({'error': 'Failed to update password'}), 500
+
+
+@auth_bp.delete('/account')
+@require_auth
+@limiter.limit("5/hour")
+def delete_account():
+    """
+    DELETE /api/auth/account
+    Deletes user profile data then Supabase Auth record.
+    Frontend must call signOut() after this succeeds.
+    """
+    try:
+        supabase = _get_supabase_service()
+
+        # Delete profile data first (foreign key constraint)
+        supabase.table('profiles').delete().eq('id', g.user_id).execute()
+
+        # Delete from Supabase Auth (hard delete)
+        supabase.auth.admin.delete_user(g.user_id)
+
+        return jsonify({'message': 'Account deleted successfully'}), 200
+    except Exception:
+        from flask import current_app
+        current_app.logger.exception("delete_account failed for user %s", g.user_id)
+        return jsonify({'error': 'Failed to delete account'}), 500
