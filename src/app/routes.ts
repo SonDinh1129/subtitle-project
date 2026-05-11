@@ -11,6 +11,7 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { UpgradePage } from "./pages/UpgradePage";
 import { UpgradeSuccessPage } from "./pages/UpgradeSuccessPage";
+import { ProfilePage } from "./pages/ProfilePage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 export const router = createBrowserRouter([
@@ -27,6 +28,7 @@ export const router = createBrowserRouter([
           { path: "editor", Component: EditorPage },
           { path: "upgrade", Component: UpgradePage },
           { path: "upgrade/success", Component: UpgradeSuccessPage },
+          { path: "profile", Component: ProfilePage },
         ],
       },
       { path: "*", Component: NotFound },
