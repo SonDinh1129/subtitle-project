@@ -368,3 +368,27 @@ export function wordsToSubtitles(words: Word[], maxChars = 42): SubtitleItem[] {
   }
   return out;
 }
+
+// ─── Profile API ─────────────────────────────────────────────────────────────
+
+export async function updateProfile(fullName: string): Promise<Response> {
+  return authFetch('/auth/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ full_name: fullName }),
+  })
+}
+
+export async function changePassword(newPassword: string): Promise<Response> {
+  return authFetch('/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_password: newPassword }),
+  })
+}
+
+export async function deleteAccount(): Promise<Response> {
+  return authFetch('/auth/account', {
+    method: 'DELETE',
+  })
+}
