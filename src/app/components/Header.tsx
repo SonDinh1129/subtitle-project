@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { Captions, Menu, X, Zap, Crown, LogOut, ChevronDown } from "lucide-react";
+import { Captions, Menu, X, Zap, Crown, LogOut, ChevronDown, UserCircle } from "lucide-react";
 import { useUiPreferences } from "../context/UiPreferencesContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -107,6 +107,14 @@ export function Header() {
                 </button>
                 {userMenuOpen && (
                   <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1 z-50">
+                    <Link
+                      to="/profile"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                    >
+                      <UserCircle className="w-4 h-4" />
+                      {isVi ? 'Thông tin tài khoản' : 'Account Settings'}
+                    </Link>
                     {!isPremium && (
                       <Link
                         to="/upgrade"
@@ -194,6 +202,14 @@ export function Header() {
                   {isPremium && <Crown className="w-4 h-4 text-amber-500" />}
                   <span className="truncate">{user.email}</span>
                 </div>
+                <Link
+                  to="/profile"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-lg"
+                >
+                  <UserCircle className="w-4 h-4" />
+                  {isVi ? 'Thông tin tài khoản' : 'Account Settings'}
+                </Link>
                 {!isPremium && (
                   <Link
                     to="/upgrade"
