@@ -5,7 +5,7 @@ Routes:
   GET /api/auth/me — return current user profile + computed is_premium
 """
 
-from flask import Blueprint, g, jsonify
+from flask import Blueprint, g, jsonify, request
 from middleware.auth import require_auth, get_profile, is_premium
 from extensions import limiter
 
@@ -29,3 +29,39 @@ def get_me():
         **profile,
         'is_premium': is_premium(profile),
     }), 200
+
+
+@auth_bp.patch('/profile')
+@require_auth
+@limiter.limit("30/minute")
+def update_profile():
+    """
+    PATCH /api/auth/profile
+    Body: { "full_name": string }
+    Returns: updated profile
+    """
+    data = request.get_json(silent=True) or {}
+    full_name = data.get('full_name', '')
+
+    if not isinstance(full_name, str):
+        return jsonify({'error': 'full_name must be a string'}), 400
+
+    full_name = full_name.strip()
+
+    try:
+        from middleware.auth import _get_supabase_service
+        supabase = _get_supabase_service()
+        result = supabase.table('profiles').update({
+            'full_name': full_name or None,
+        }).eq('id', g.user_id).execute()
+
+        updated = result.data[0] if result.data else None
+        if not updated:
+            return jsonify({'error': 'Profile not found'}), 404
+
+        return jsonify({
+            **updated,
+            'is_premium': is_premium(updated),
+        }), 200
+    except Exception:
+        return jsonify({'error': 'Failed to update profile'}), 500
