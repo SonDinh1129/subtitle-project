@@ -6,7 +6,7 @@ Routes:
 """
 
 from flask import Blueprint, g, jsonify, request
-from middleware.auth import require_auth, get_profile, is_premium
+from middleware.auth import require_auth, get_profile, is_premium, _get_supabase_service
 from extensions import limiter
 
 auth_bp = Blueprint('auth', __name__)
@@ -48,8 +48,10 @@ def update_profile():
 
     full_name = full_name.strip()
 
+    if len(full_name) > 200:
+        return jsonify({'error': 'full_name too long (max 200 characters)'}), 400
+
     try:
-        from middleware.auth import _get_supabase_service
         supabase = _get_supabase_service()
         result = supabase.table('profiles').update({
             'full_name': full_name or None,
@@ -59,9 +61,14 @@ def update_profile():
         if not updated:
             return jsonify({'error': 'Profile not found'}), 404
 
+        if hasattr(g, '_profile'):
+            del g._profile
+
         return jsonify({
             **updated,
             'is_premium': is_premium(updated),
         }), 200
     except Exception:
+        from flask import current_app
+        current_app.logger.exception("update_profile failed for user %s", g.user_id)
         return jsonify({'error': 'Failed to update profile'}), 500
