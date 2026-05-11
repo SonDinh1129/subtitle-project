@@ -72,3 +72,34 @@ def update_profile():
         from flask import current_app
         current_app.logger.exception("update_profile failed for user %s", g.user_id)
         return jsonify({'error': 'Failed to update profile'}), 500
+
+
+@auth_bp.post('/change-password')
+@require_auth
+@limiter.limit("10/minute")
+def change_password():
+    """
+    POST /api/auth/change-password
+    Body: { "new_password": string }
+    Uses Supabase Admin API — no old password required.
+    """
+    data = request.get_json(silent=True) or {}
+    new_password = data.get('new_password', '')
+
+    if not new_password or len(new_password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    if len(new_password) > 72:
+        return jsonify({'error': 'Password too long (max 72 characters)'}), 400
+
+    try:
+        supabase = _get_supabase_service()
+        supabase.auth.admin.update_user_by_id(
+            g.user_id,
+            {'password': new_password}
+        )
+        return jsonify({'message': 'Password updated successfully'}), 200
+    except Exception:
+        from flask import current_app
+        current_app.logger.exception("change_password failed for user %s", g.user_id)
+        return jsonify({'error': 'Failed to update password'}), 500
