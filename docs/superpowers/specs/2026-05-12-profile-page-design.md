@@ -48,6 +48,7 @@ Single page, centered container `max-w-2xl`, padding `py-10 px-4`. 3 card sectio
 │                                     │
 │  CARD 2: Đổi mật khẩu              │
 │  ┌─────────────────────────────┐   │
+│  │ Mật khẩu hiện tại [_______] │   │
 │  │ Mật khẩu mới [____________] │   │
 │  │ Xác nhận    [____________]  │   │
 │  │              [Đổi mật khẩu] │   │
@@ -88,11 +89,13 @@ Single page, centered container `max-w-2xl`, padding `py-10 px-4`. 3 card sectio
 
 ### Card 2 — Đổi mật khẩu
 - Client validation trước khi gọi API:
-  - 2 field phải khớp nhau
-  - Tối thiểu 8 ký tự
-- Submit: `POST /auth/change-password` với body `{ new_password: string }`
+  - 3 field: mật khẩu hiện tại, mật khẩu mới, xác nhận mật khẩu mới
+  - Mật khẩu mới và xác nhận phải khớp nhau
+  - Mật khẩu mới tối thiểu 8 ký tự
+- Frontend verify mật khẩu cũ trước: gọi `supabase.auth.signInWithPassword({ email, password: currentPassword })` — nếu sai trả lỗi ngay, không gọi API backend
+- Nếu đúng: Submit `POST /auth/change-password` với body `{ new_password: string }`
 - Backend: gọi Supabase Admin API `auth.admin.updateUserById(userId, { password })`
-- Success: clear cả 2 input field
+- Success: clear cả 3 input field
 
 ### Card 3 — Xóa tài khoản
 - Button `Xóa tài khoản` chỉ enable khi giá trị input email khớp với `user.email`

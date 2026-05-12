@@ -4,6 +4,7 @@ import { UserCircle, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useUiPreferences } from '../context/UiPreferencesContext'
 import { updateProfile, changePassword, deleteAccount } from '../../lib/api'
+import { supabase } from '../../lib/supabase'
 
 type FeedbackState = { type: 'success' | 'error'; message: string } | null
 
@@ -19,6 +20,7 @@ export function ProfilePage() {
   const [infoFeedback, setInfoFeedback] = useState<FeedbackState>(null)
 
   // Card 2 — Change password
+  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [pwLoading, setPwLoading] = useState(false)
@@ -58,8 +60,12 @@ export function ProfilePage() {
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault()
     setPwFeedback(null)
+    if (!currentPassword) {
+      setPwFeedback({ type: 'error', message: isVi ? 'Vui lòng nhập mật khẩu hiện tại' : 'Please enter your current password' })
+      return
+    }
     if (newPassword !== confirmPassword) {
-      setPwFeedback({ type: 'error', message: isVi ? 'Mật khẩu không khớp' : 'Passwords do not match' })
+      setPwFeedback({ type: 'error', message: isVi ? 'Mật khẩu mới không khớp' : 'Passwords do not match' })
       return
     }
     if (newPassword.length < 8) {
@@ -68,8 +74,18 @@ export function ProfilePage() {
     }
     setPwLoading(true)
     try {
+      // Verify current password via Supabase before calling backend
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user?.email ?? '',
+        password: currentPassword,
+      })
+      if (signInError) {
+        setPwFeedback({ type: 'error', message: isVi ? 'Mật khẩu hiện tại không đúng' : 'Current password is incorrect' })
+        return
+      }
       const res = await changePassword(newPassword)
       if (res.ok) {
+        setCurrentPassword('')
         setNewPassword('')
         setConfirmPassword('')
         setPwFeedback({ type: 'success', message: isVi ? 'Đã đổi mật khẩu thành công' : 'Password changed successfully' })
@@ -170,6 +186,18 @@ export function ProfilePage() {
           <form onSubmit={handleChangePassword} className="space-y-4">
             <div className="space-y-1">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {isVi ? 'Mật khẩu hiện tại' : 'Current Password'}
+              </label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={e => setCurrentPassword(e.target.value)}
+                placeholder={isVi ? 'Nhập mật khẩu hiện tại' : 'Enter current password'}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 {isVi ? 'Mật khẩu mới' : 'New Password'}
               </label>
               <input
@@ -182,7 +210,7 @@ export function ProfilePage() {
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {isVi ? 'Xác nhận mật khẩu' : 'Confirm Password'}
+                {isVi ? 'Xác nhận mật khẩu mới' : 'Confirm New Password'}
               </label>
               <input
                 type="password"
@@ -196,7 +224,7 @@ export function ProfilePage() {
             <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={pwLoading || !newPassword || !confirmPassword}
+                disabled={pwLoading || !currentPassword || !newPassword || !confirmPassword}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
               >
                 {pwLoading && <Loader2 className="w-4 h-4 animate-spin" />}
