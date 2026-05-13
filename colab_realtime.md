@@ -250,6 +250,10 @@ app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
 
+# Only one Kyutai streaming session at a time — the mimi streaming context is not re-entrant.
+_kyutai_lock = threading.Lock()
+_streaming_active = False
+
 class WordSegmentAccumulator:
     def __init__(self):
         self.words = []
@@ -314,6 +318,22 @@ def _do_translate_segment(en_words, start, end):
 
 @sock.route("/ws/transcribe_kyutai")
 def transcribe_kyutai_ws(ws):
+    global _streaming_active
+    if not _kyutai_lock.acquire(blocking=False):
+        logger.warning("⛔ Rejected new WS connection — server already streaming")
+        try:
+            ws.send(json.dumps({"type": "error", "message": "Server busy, try again shortly"}))
+        except Exception:
+            pass
+        return
+
+    # Reset any stale streaming state left by an abnormally-closed previous session
+    try:
+        kyutai_mimi.reset_streaming()
+    except Exception:
+        pass
+
+    _streaming_active = True
     logger.info("⚡ Kyutai WS connection opened — model: kyutai/stt-1b-en_fr (EN+FR only!)")
     accumulator = WordSegmentAccumulator()
     frame_idx = 0
@@ -446,6 +466,8 @@ def transcribe_kyutai_ws(ws):
         translate_queue.put(None)
         stop_flag.set()
         worker.join(timeout=5)
+        _streaming_active = False
+        _kyutai_lock.release()
         logger.info("⚡ Kyutai WS connection closed")
 
 @app.route("/health")
@@ -459,6 +481,7 @@ def health():
         },
         "device": kyutai_device,
         "ws_endpoint": "/ws/transcribe_kyutai",
+        "streaming_active": _streaming_active,
     })
 
 # ============================================

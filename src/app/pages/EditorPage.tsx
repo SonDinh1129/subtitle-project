@@ -418,9 +418,12 @@ export function EditorPage() {
     }
   }, []);
 
+  const streamStartedRef = useRef(false);
+
   useEffect(() => {
     if (!isRealtimeMode || !currentJobId) return;
-    if (streamStatus === "done" || streamStatus === "error") return;
+    if (streamStartedRef.current) return;
+    streamStartedRef.current = true;
 
     setStreamStatus("streaming");
     let cancelled = false;
@@ -503,7 +506,7 @@ export function EditorPage() {
       cancelled = true;
       es?.close();
     };
-  }, [isRealtimeMode, currentJobId, streamStatus]);
+  }, [isRealtimeMode, currentJobId]);
 
   useEffect(() => {
     if (!isRealtimeMode) return;
