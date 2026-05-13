@@ -50,7 +50,7 @@ function isLikelyVideoFile(file: File): boolean {
 
 export function UploadPage() {
   const { language: appLanguage } = useUiPreferences();
-  const { isPremium, profile, user, isLoading: authLoading } = useAuth();
+  const { isPremium, profile, user, isLoading: authLoading, refreshProfile } = useAuth();
   const isVi = appLanguage === "vi";
   const wasGuestRef = useRef(false);
   const isDemo = !authLoading && (!user || user.is_anonymous === true);
@@ -131,6 +131,7 @@ export function UploadPage() {
           localStorage.setItem("demo_done", "1");
           setDemoDone(true);
         }
+        refreshProfile();
         navigate(`/editor?mode=realtime&job_id=${encodeURIComponent(jobId)}`);
         return;
       }
@@ -154,6 +155,7 @@ export function UploadPage() {
         localStorage.setItem("demo_done", "1");
         setDemoDone(true);
       }
+      refreshProfile();
       setState("done");
 
     } catch (err: unknown) {
