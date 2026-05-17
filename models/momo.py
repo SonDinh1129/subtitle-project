@@ -81,7 +81,7 @@ def verify_momo_ipn(data: dict) -> bool:
 
     received_sig = data.get("signature", "")
     raw = (
-        f"accessKey={data.get('accessKey', '')}"
+        f"accessKey={os.environ.get('MOMO_ACCESS_KEY', '')}"
         f"&amount={data.get('amount', '')}"
         f"&extraData={data.get('extraData', '')}"
         f"&message={data.get('message', '')}"
