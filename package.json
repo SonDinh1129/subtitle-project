@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite --port 5173",
-    "start": "concurrently \"vite --port 5173\" \"set PYTHONIOENCODING=utf-8 && .venv\\\\Scripts\\\\python.exe app.py\" \"ngrok http 5000 --authtoken=3DrTwR8czhkpaWkUP7UxXXiTOoZ_4aZE8LnxXmWY1Dqv22hBx --domain=dairy-proclaim-veteran.ngrok-free.dev\""
+    "dev": "concurrently \"vite --port 5173\" \"set PYTHONIOENCODING=utf-8 && .venv\\\\Scripts\\\\python.exe app.py\" \"ngrok http 5000 --authtoken=3DrTwR8czhkpaWkUP7UxXXiTOoZ_4aZE8LnxXmWY1Dqv22hBx --domain=dairy-proclaim-veteran.ngrok-free.dev\"",
+    "start": "concurrently \"set PYTHONIOENCODING=utf-8 && .venv\\\\Scripts\\\\python.exe app.py\" \"ngrok http 5000 --authtoken=3DrTwR8czhkpaWkUP7UxXXiTOoZ_4aZE8LnxXmWY1Dqv22hBx --domain=dairy-proclaim-veteran.ngrok-free.dev\""
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
