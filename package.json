@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --port 5173",
-    "start": "concurrently \"vite --port 5173\" \".venv\\\\Scripts\\\\python.exe app.py\""
+    "start": "concurrently \"vite --port 5173\" \"set PYTHONIOENCODING=utf-8 && .venv\\\\Scripts\\\\python.exe app.py\""
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
