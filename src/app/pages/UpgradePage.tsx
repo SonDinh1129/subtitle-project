@@ -64,7 +64,7 @@ export function UpgradePage() {
             {isVi ? "Mở khóa toàn bộ tính năng" : "Unlock everything"}
           </h1>
           <p className="text-gray-500 dark:text-gray-400 text-lg">
-            {isVi ? "Một lần thanh toán, dùng mãi mãi." : "One-time payment, use forever."}
+            {isVi ? "Gia hạn hàng năm, hủy bất cứ lúc nào." : "Billed yearly, cancel anytime."}
           </p>
         </motion.div>
 
@@ -121,7 +121,7 @@ export function UpgradePage() {
               </div>
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-bold text-gray-900 dark:text-white">99.000đ</span>
-                <span className="text-sm text-gray-500 dark:text-gray-400">{isVi ? " / vĩnh viễn" : " / forever"}</span>
+                <span className="text-sm text-gray-500 dark:text-gray-400">{isVi ? " / năm" : " / year"}</span>
               </div>
             </div>
 
@@ -177,8 +177,8 @@ export function UpgradePage() {
 
         <p className="text-center text-xs text-gray-400 dark:text-gray-500">
           {isVi
-            ? "Thanh toán an toàn qua MoMo. Không hoàn tiền sau khi kích hoạt."
-            : "Secure payment via MoMo. No refunds after activation."}
+            ? "Thanh toán an toàn qua MoMo. Tự động gia hạn mỗi năm."
+            : "Secure payment via MoMo. Renews annually."}
         </p>
       </div>
     </div>

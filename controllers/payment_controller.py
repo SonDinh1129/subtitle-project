@@ -47,7 +47,7 @@ def create_order():
     amount       = 99000
     redirect_url = f"{frontend_url}/upgrade/success"
     ipn_url      = f"{ngrok_url}/api/payment/ipn"
-    order_info   = "SubAI Premium (lifetime)"
+    order_info   = "SubAI Premium (1 year)"
 
     try:
         momo_resp, order_id = create_momo_payment(amount, order_info, redirect_url, ipn_url)
@@ -115,15 +115,16 @@ def payment_ipn():
         return jsonify({"ok": True}), 200
 
     user_id = payment["user_id"]
-    now     = datetime.now(timezone.utc).isoformat()
+    now           = datetime.now(timezone.utc)
+    premium_until = now.replace(year=now.year + 1)
 
     supabase.table("payments").update({
         "status":  "paid",
-        "paid_at": now,
+        "paid_at": now.isoformat(),
     }).eq("momo_order_id", order_id).execute()
 
     supabase.table("profiles").update({
-        "premium_until": "9999-12-31T23:59:59+00:00",
+        "premium_until": premium_until.isoformat(),
     }).eq("id", user_id).execute()
 
     return jsonify({"ok": True}), 200
