@@ -81,7 +81,11 @@ def payment_ipn():
     """
     data = request.get_json(silent=True) or {}
 
+    import logging
+    logging.warning(f"[IPN] received: {data}")
+
     if not verify_momo_ipn(data):
+        logging.warning(f"[IPN] signature FAILED for orderId={data.get('orderId')} sig={data.get('signature')}")
         return jsonify({"error": "Invalid signature"}), 400
 
     order_id    = data.get("orderId", "")
