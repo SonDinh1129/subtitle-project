@@ -22,9 +22,9 @@ export function UpgradeSuccessPage() {
         return;
       }
       attemptsRef.current += 1;
-      await refreshProfile();
+      const premium = await refreshProfile();
 
-      if (isPremium) {
+      if (premium) {
         setStatus("success");
         return;
       }

@@ -21,7 +21,7 @@ interface AuthContextValue {
   isLoading: boolean
   isPremium: boolean
   signOut: () => Promise<void>
-  refreshProfile: () => Promise<void>
+  refreshProfile: () => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -42,14 +42,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = useCallback(async (): Promise<boolean> => {
     const { data: { session: currentSession } } = await supabase.auth.getSession()
     if (!currentSession) {
       setProfile(null)
-      return
+      return false
     }
     const p = await fetchProfile(currentSession.access_token)
     setProfile(p)
+    return p?.is_premium ?? false
   }, [])
 
   useEffect(() => {
