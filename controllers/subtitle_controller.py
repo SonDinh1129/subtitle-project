@@ -34,6 +34,7 @@ from extensions import limiter
 from models.subtitle_optimizer import (
     parse_srt, write_srt, optimize_subtitles, get_optimization_stats,
 )
+from models.subtitle_quality import analyze_srt_file
 
 # ─────────────────────────────────────────────────────────────────
 # Blueprint
@@ -440,3 +441,48 @@ def optimize_job_subtitles(job_id):
         path=opt_path,
         stats=get_optimization_stats(blocks, optimized),
     )
+
+
+# ─────────────────────────────────────────────────────────────────
+# QUALITY REPORT
+# ─────────────────────────────────────────────────────────────────
+
+@subtitle_bp.get("/jobs/<job_id>/report")
+@require_auth
+def quality_report(job_id: str):
+    """
+    Phân tích chất lượng SRT của một job.
+
+    Query params:
+        lang: "en" | "vi" (default: "vi")
+        srt:  "original" | "optimized" (default: "original")
+              "optimized" chỉ hoạt động nếu đã chạy /optimize trước đó
+
+    Response: QualityReport JSON với per-block metrics và summary stats.
+    """
+    job = get_job(job_id)
+    if not job:
+        return jsonify(error="Job not found"), 404
+    if job.get("user_id") and job["user_id"] != g.user_id:
+        return jsonify(error="Forbidden"), 403
+
+    lang = request.args.get("lang", "vi")
+    if lang not in ("en", "vi"):
+        return jsonify(error="lang must be 'en' or 'vi'"), 400
+
+    srt_variant = request.args.get("srt", "original")
+
+    if lang == "en":
+        srt_path = job.get("en_srt_path")
+    elif srt_variant == "optimized":
+        srt_path = job.get("vi_srt_optimized_path")
+        if not srt_path:
+            return jsonify(error="Optimized SRT not found — run /optimize first"), 404
+    else:
+        srt_path = job.get("vi_srt_path")
+
+    if not srt_path or not os.path.exists(srt_path):
+        return jsonify(error=f"{lang.upper()} SRT not found"), 404
+
+    report = analyze_srt_file(srt_path, lang=lang)
+    return jsonify(report.to_dict())
