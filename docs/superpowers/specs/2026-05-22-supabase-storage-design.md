@@ -55,7 +55,7 @@ Examples:
 87813ab3-dd37-.../46286bd8-.../export_1080p_en.mp4
 ```
 
-RLS: Storage bucket policies restrict `SELECT` to objects whose first path segment equals `auth.uid()::text`. Backend uses the service-role key to bypass RLS for writes.
+Access model: bucket is **private**. Clients never list or write directly to Storage and never call `supabase.storage.from_(...).download(...)` from the browser. Backend uses the service-role key to upload objects and generate short-lived signed URLs that the client follows. An owner-based Storage SELECT policy may be added later for direct-read use cases, but the current API path relies exclusively on backend-issued signed URLs — see §6 for authorization at the application layer.
 
 ## 4. Database schema
 
@@ -96,6 +96,7 @@ create table public.jobs (
 
   error             text,
 
+  completed_at      timestamptz,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -140,6 +141,8 @@ for each row execute function public.set_updated_at();
   Enables idempotent re-export (§8).
 - **Transcript + words kept in `jobs`.** Postgres TOAST stores oversized JSONB out-of-row; list queries that `SELECT job_id, filename, status, progress, created_at, updated_at, error` will not pay the cost. If list latency becomes a problem, extract to `job_results` later — cheap migration.
 - **Two indexes**: `(user_id, created_at desc)` for history view, `(user_id, status)` for "active jobs" queries.
+- **`completed_at`** is set exactly once, at the moment `status` first transitions to `done`. Unlike `updated_at` (which moves every time the user triggers a new export), `completed_at` is a stable anchor for "when did this job finish" — used by retention/cleanup logic and any future history UI. Not enforced by constraint; pipeline code is responsible for setting it.
+- **`source_lang` default `'en'`** is kept because the Flask layer already defaults to `'en'` and current pipeline only supports English-to-Vietnamese. When auto-detect or other source languages are added, drop the default at the same time as the pipeline change for atomic migration.
 
 ## 5. Pipeline lifecycle
 
@@ -164,30 +167,47 @@ Unchanged externally. Internally `create_job` now writes Postgres instead of JSO
 ### `GET /api/jobs/{id}` and `GET /api/jobs/{id}/stream`
 Unchanged externally. `get_job` reads Postgres (via `_jobs` memory cache hit first for SSE hot path).
 
-### `GET /api/download-srt?job_id=...&lang=en|vi` *(rename/replace existing `/download` route)*
+### Authorization rule (applies to every endpoint below)
 
-**Before:** `send_file(local_path)`.
-**After:** returns JSON:
+The service-role key bypasses RLS. **Application code must enforce ownership** before issuing any signed URL or mutating job state:
+
+```python
+job = repo.get_job(job_id)
+if not job:
+    return jsonify({"error": "Job not found"}), 404
+if job["user_id"] != g.user_id:
+    return jsonify({"error": "Forbidden"}), 403
+```
+
+This check is mandatory in every handler that touches a specific `job_id`.
+
+### `GET /api/jobs/{job_id}/srt-url?lang=en|vi` *(replaces `/api/download/{job_id}`)*
+
+Returns JSON:
 ```json
 { "url": "https://xnpieqombgbhgxpuxxrk.supabase.co/storage/v1/object/sign/...", "expires_in": 3600 }
 ```
 Frontend triggers download via hidden `<a download href={url}>` or `window.location.href = url`.
 
-Rationale for JSON over 302 redirect: avoids JWT exposure in `?token=` query (current SSE uses query-token because `EventSource` can't send headers — `<a>` would face the same constraint). JSON keeps `Authorization` header flow intact and gives the frontend a clear hook for error states (expired token, missing file).
+Rationale for JSON over 302 redirect: avoids JWT exposure in `?token=` query (current SSE already uses query-token because `EventSource` can't send headers — `<a>` would face the same constraint). JSON keeps the `Authorization` header flow intact and gives the frontend a clear hook for error states (expired token, missing file, job not done).
 
-### `POST /api/export`
+Returns 404 if the job has no `{lang}_srt_storage_path` yet (i.e., pipeline not done or still uploading).
 
-Now:
-1. Check `jobs.exports->'{resolution}_{lang}'` — if present and signed URL still works, return it.
-2. Otherwise render burned-subtitle MP4 to local `outputs/`.
-3. Upload to Storage.
-4. Update `jobs.exports` via `jsonb_set`.
-5. Delete local MP4.
-6. Return signed URL.
+### `POST /api/jobs/{job_id}/export` *(replaces `POST /api/export`)*
 
-### `GET /api/exports/{filename}`
+Body: `{ "resolution": "720p", "lang": "vi" }`.
 
-Replaced by signed-URL response from `POST /api/export`. Direct `/api/exports/...` endpoint kept for 1 release cycle returning 404 with a note (unused once frontend updates).
+1. Authorize ownership.
+2. Check `jobs.exports->'{resolution}_{lang}'`. If present, generate a fresh signed URL from the stored `path` and return it. Skip rendering.
+3. Otherwise: render burned-subtitle MP4 to local `outputs/`.
+4. Upload to Storage at `{user_id}/{job_id}/export_{resolution}_{lang}.mp4`.
+5. Update `jobs.exports` via `jsonb_set` to add `{resolution}_{lang}` entry.
+6. Delete local MP4.
+7. Return signed URL.
+
+### Legacy endpoints
+
+`GET /api/exports/{filename}` and `GET /api/download/{job_id}` are removed in this PR (frontend updated in same PR — no consumers remain).
 
 ### `GET /api/video/{filename}` (legacy)
 
@@ -217,13 +237,16 @@ update_job(
     progress=100,
     en_srt_storage_path=en_path,
     vi_srt_storage_path=vi_path,
+    completed_at='now()',  # set exactly once, at the done transition
 )
 ```
 
 Failure modes covered:
 - Upload throws → outer `try` sets `status='error'`. DB never claims `done`.
-- DB update throws after uploads succeed → caught by outer `try`, status flips to `error`. Storage objects orphaned but harmless; cleanup script (§9) will remove via Storage lifecycle or on retry.
-- Worker crashes between upload and DB update → job stuck in `generating_srt`. Acceptable for v1 (rare, manual reset). Future: a stale-job sweeper.
+- DB update throws after uploads succeed → outer handler attempts to mark `status='error'`. If that attempt also fails (DB still unreachable), the job stays in `generating_srt` and the Storage objects are orphaned. No automatic recovery in v1; requires manual reset (UPDATE) or a future stale-job sweeper.
+- Worker crashes between upload and DB update → same outcome as above: job stuck in `generating_srt`, Storage objects orphaned. Same mitigation.
+
+In all failure modes the invariant in the box above holds: `status='done'` is never visible without both Storage paths present and valid.
 
 For `/api/export`, same ordering: upload to Storage → update `exports` JSONB → delete local file. If DB update fails, local file lingers (cleanup removes it later); Storage object orphaned (acceptable, key collision on re-export is safe because key is deterministic).
 
@@ -238,6 +261,8 @@ When `POST /api/export` is called with `(resolution, lang)`:
 3. If absent: render → upload → store entry → return signed URL.
 
 Storage path is deterministic per `(user_id, job_id, resolution, lang)`, so re-render after a delete is safe — same path overwrites cleanly.
+
+**Concurrent export race (acknowledged, not fixed in v1):** if the user fires two `POST /api/jobs/{id}/export` calls with identical `(resolution, lang)` before the first finishes, both will see `exports->'{key}'` absent and render in parallel. Both uploads target the same deterministic Storage key, so the second simply overwrites the first — result is correct, just wasted CPU. Future fix: per-job export lock via Postgres advisory lock (`select pg_advisory_xact_lock(hashtext(job_id || ':' || export_key))`) at the start of the handler. Not implemented now (low frequency, no correctness impact).
 
 ## 9. Local cleanup
 
@@ -290,7 +315,10 @@ If pipeline crashes between Storage upload and DB update, the SRT/MP4 in Storage
    - Modify `run_pipeline` and `run_pipeline_realtime` to upload SRT and update DB atomically per §7.
    - Add per-job cleanup of video + audio after success.
 5. **Backend — endpoints:**
-   - Refactor `download_srt`, `export_video`, `download_exported_video` per §6.
+   - Add `GET /api/jobs/{job_id}/srt-url?lang=...` returning JSON `{url, expires_in}`.
+   - Add `POST /api/jobs/{job_id}/export` (with idempotency check on `exports` JSONB).
+   - Remove legacy `download_srt`, `export_video`, `download_exported_video` routes.
+   - Every job-scoped handler runs the authorization check from §6.
 6. **Backend — cleanup daemon:**
    - Add `cleanup_local_outputs(retention_days=7)`, wire to app start.
 7. **Frontend:**
