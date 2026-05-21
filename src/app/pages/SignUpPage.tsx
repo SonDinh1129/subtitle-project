@@ -67,7 +67,6 @@ export function SignUpPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -81,7 +80,6 @@ export function SignUpPage() {
     fullName?: string;
     email?: string;
     password?: string;
-    agreed?: string;
   }>({});
 
   const resendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -99,7 +97,6 @@ export function SignUpPage() {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = isVi ? "Vui lòng nhập địa chỉ email hợp lệ" : "Enter a valid email address";
     if (!password) e.password = isVi ? "Mật khẩu là bắt buộc" : "Password is required";
     else if (password.length < 8) e.password = isVi ? "Mật khẩu phải có ít nhất 8 ký tự" : "Password must be at least 8 characters";
-    if (!agreed) e.agreed = isVi ? "Vui lòng đồng ý điều khoản để tiếp tục" : "Please accept the terms to continue";
     return e;
   };
 
@@ -488,44 +485,6 @@ export function SignUpPage() {
               <PasswordStrength password={password} isVi={isVi} />
               {errors.password && (
                 <p className="mt-1.5 text-red-500" style={{ fontSize: "0.8125rem" }}>{errors.password}</p>
-              )}
-            </div>
-
-            {/* Terms checkbox */}
-            <div>
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <div className="relative mt-0.5 shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={agreed}
-                    onChange={(e) => { setAgreed(e.target.checked); setErrors((p) => ({ ...p, agreed: undefined })); }}
-                    className="sr-only"
-                  />
-                  <div
-                    className={`w-4.5 h-4.5 rounded-md border-2 flex items-center justify-center transition-all
-                      ${agreed
-                        ? "bg-violet-600 border-violet-600"
-                        : errors.agreed
-                          ? "border-red-400 bg-white"
-                          : "border-gray-300 bg-white group-hover:border-violet-400"
-                      }`}
-                  >
-                    {agreed && (
-                      <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 12 10" fill="none">
-                        <path d="M1 5l3.5 3.5L11 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-                </div>
-                <span className="text-gray-600 leading-snug" style={{ fontSize: "0.875rem" }}>
-                  {isVi ? "Tôi đồng ý với" : "I agree to the"}{" "}
-                  <a href="#" className="text-violet-600 hover:text-violet-700 underline transition-colors">{isVi ? "Điều khoản dịch vụ" : "Terms of Service"}</a>
-                  {" "}{isVi ? "và" : "and"}{" "}
-                  <a href="#" className="text-violet-600 hover:text-violet-700 underline transition-colors">{isVi ? "Chính sách quyền riêng tư" : "Privacy Policy"}</a>
-                </span>
-              </label>
-              {errors.agreed && (
-                <p className="mt-1.5 text-red-500" style={{ fontSize: "0.8125rem" }}>{errors.agreed}</p>
               )}
             </div>
 

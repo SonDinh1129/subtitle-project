@@ -10,12 +10,10 @@ import {
   ArrowRight,
   CheckCircle2,
   Play,
-  Captions,
   Languages,
   Sparkles,
   Shield,
   ChevronRight,
-  Users,
   Video,
   FileText,
 } from "lucide-react";
@@ -67,35 +65,6 @@ const features = [
   },
 ];
 
-const testimonials = [
-  {
-    name: "Sarah Chen",
-    role: "YouTube Creator · 2.1M subscribers",
-    avatar: "SC",
-    avatarColor: "from-violet-500 to-purple-500",
-    quote:
-      "SubAI cut my subtitle workflow from 3 hours to 5 minutes. The accuracy is incredible — I barely need to make any edits.",
-    rating: 5,
-  },
-  {
-    name: "Marcus Rivera",
-    role: "Online Educator",
-    avatar: "MR",
-    avatarColor: "from-blue-500 to-cyan-500",
-    quote:
-      "I use SubAI for all my course videos. The English subtitle flow is consistent and quick to review.",
-    rating: 5,
-  },
-  {
-    name: "Aisha Okonkwo",
-    role: "Social Media Manager",
-    avatar: "AO",
-    avatarColor: "from-rose-500 to-pink-500",
-    quote:
-      "Game changer for our agency. We handle 50+ client videos per week and SubAI makes it all manageable.",
-    rating: 5,
-  },
-];
 
 const steps = [
   {
@@ -165,20 +134,6 @@ const stats = [
   { value: "99k₫/yr", label: "Premium — less than 1 coffee/mo" },
 ];
 
-const docsItems = [
-  {
-    title: "Quick Start Guide",
-    desc: "Set up upload, run subtitle generation, and export your first English SRT in minutes.",
-  },
-  {
-    title: "Realtime Workflow",
-    desc: "Learn how streaming segments appear in editor and how to edit while processing.",
-  },
-  {
-    title: "API Reference",
-    desc: "Upload, poll, stream, and export endpoints for integrating with your own frontend.",
-  },
-];
 
 export function LandingPage() {
   const location = useLocation();
@@ -253,22 +208,6 @@ export function LandingPage() {
       ]
     : pricingPlans;
 
-  const localizedDocsItems = isVi
-    ? [
-        {
-          title: "Hướng dẫn bắt đầu nhanh",
-          desc: "Thiết lập upload, chạy tạo phụ đề và xuất SRT tiếng Anh đầu tiên trong vài phút.",
-        },
-        {
-          title: "Luồng Realtime",
-          desc: "Tìm hiểu cách segment xuất hiện dần trong editor và chỉnh sửa trong lúc xử lý.",
-        },
-        {
-          title: "Tài liệu API",
-          desc: "Các endpoint upload, poll, stream và export để tích hợp vào frontend của bạn.",
-        },
-      ]
-    : docsItems;
 
   const localizedStats = isVi
     ? [
@@ -279,28 +218,6 @@ export function LandingPage() {
       ]
     : stats;
 
-  const localizedTestimonials = isVi
-    ? [
-        {
-          ...testimonials[0],
-          role: "Nhà sáng tạo YouTube · 2.1M người đăng ký",
-          quote:
-            "SubAI giúp mình rút quy trình làm phụ đề từ 3 giờ xuống còn 5 phút. Độ chính xác rất ấn tượng, gần như không cần sửa nhiều.",
-        },
-        {
-          ...testimonials[1],
-          role: "Nhà giáo dục trực tuyến",
-          quote:
-            "Mình dùng SubAI cho toàn bộ video khóa học. Luồng phụ đề tiếng Anh ổn định và rất nhanh để kiểm tra.",
-        },
-        {
-          ...testimonials[2],
-          role: "Quản lý mạng xã hội",
-          quote:
-            "Đây là công cụ thay đổi cuộc chơi cho agency của mình. Chúng mình xử lý hơn 50 video mỗi tuần và SubAI giúp mọi thứ nhẹ hơn rất nhiều.",
-        },
-      ]
-    : testimonials;
 
   useEffect(() => {
     if (!location.hash) return;
@@ -589,137 +506,6 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ─── Social Proof / Use Cases ─── */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <motion.div
-              initial={{ opacity: 0, x: -30 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-            >
-              <span className="text-sm text-violet-600 bg-violet-50 px-3 py-1 rounded-full border border-violet-100">
-                {isVi ? "Xây cho nhà sáng tạo" : "Built for creators"}
-              </span>
-              <h2 className="text-4xl text-gray-900 dark:text-gray-100 mt-4 mb-6 tracking-tight">
-                {isVi ? "Được 50.000+ nhà sáng tạo trên toàn cầu tin dùng" : "Trusted by 50,000+ creators worldwide"}
-              </h2>
-              <p className="text-gray-500 dark:text-gray-300 mb-8 leading-relaxed">
-                {isVi
-                  ? "Từ YouTuber cá nhân đến đội ngũ media doanh nghiệp, SubAI mở rộng linh hoạt để đáp ứng nhu cầu phụ đề của bạn. Pipeline tập trung cho tiếng Anh của chúng tôi đã xử lý hơn 10 triệu video."
-                  : "From solo YouTubers to enterprise media teams, SubAI scales to meet your subtitle needs. Our English-focused pipeline has processed over 10 million videos."}
-              </p>
-              <div className="space-y-4">
-                {[
-                  {
-                    icon: Users,
-                    label: isVi ? "Nhà sáng tạo nội dung" : "Content Creators",
-                    desc: isVi ? "Tiết kiệm hàng giờ cho mỗi video" : "Save hours per video",
-                  },
-                  {
-                    icon: Captions,
-                    label: isVi ? "Nhà giáo dục" : "Educators",
-                    desc: isVi ? "Giúp khóa học dễ tiếp cận hơn" : "Make courses accessible",
-                  },
-                  {
-                    icon: Languages,
-                    label: isVi ? "Đội ngũ tiếng Anh" : "English Teams",
-                    desc: isVi
-                      ? "Chuẩn hóa một quy trình phụ đề thống nhất"
-                      : "Standardize one subtitle workflow",
-                  },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <item.icon className="w-4 h-4 text-violet-600" />
-                    </div>
-                    <div>
-                      <div className="text-gray-900 dark:text-gray-100 text-sm">{item.label}</div>
-                      <div className="text-gray-500 dark:text-gray-300 text-sm">{item.desc}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, x: 30 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              className="relative"
-            >
-              <div className="rounded-2xl overflow-hidden shadow-2xl shadow-gray-100">
-                <ImageWithFallback
-                  src="https://images.unsplash.com/photo-1758273238952-9f9521504c7d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjb250ZW50JTIwY3JlYXRvciUyMHJlY29yZGluZyUyMHZpZGVvJTIwc3R1ZGlvfGVufDF8fHx8MTc3MzQxMzI3NHww&ixlib=rb-4.1.0&q=80&w=1080"
-                  alt="Content creator using SubAI"
-                  className="w-full h-80 object-cover"
-                />
-              </div>
-              {/* Floating card */}
-              <div className="absolute -bottom-5 -left-5 bg-white rounded-2xl shadow-xl border border-gray-100 p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                  ))}
-                </div>
-                <p className="text-sm text-gray-700 max-w-xs">
-                  {isVi
-                    ? '"Từ 3 tiếng còn 5 phút. SubAI thật sự quá ấn tượng."'
-                    : '"From 3 hours to 5 minutes. SubAI is incredible."'}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  {isVi ? "— Sarah Chen, 2,1M người theo dõi" : "— Sarah Chen, 2.1M subscribers"}
-                </p>
-              </div>
-            </motion.div>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── Testimonials ─── */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <span className="text-sm text-violet-600 bg-violet-50 dark:bg-violet-900/30 dark:border-violet-700 px-3 py-1 rounded-full border border-violet-100">
-              {isVi ? "Đánh giá" : "Testimonials"}
-            </span>
-            <h2 className="text-4xl text-gray-900 dark:text-gray-100 mt-4 mb-4 tracking-tight">
-              {isVi ? "Được yêu thích bởi cộng đồng creator" : "Loved by creators everywhere"}
-            </h2>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {localizedTestimonials.map((t, i) => (
-              <motion.div
-                key={t.name}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.1 }}
-                className="bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-800 rounded-2xl p-6 shadow-sm"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  {[...Array(t.rating)].map((_, j) => (
-                    <Star key={j} className="w-4 h-4 text-amber-400 fill-amber-400" />
-                  ))}
-                </div>
-                <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed mb-6">"{t.quote}"</p>
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-full bg-gradient-to-br ${t.avatarColor} flex items-center justify-center text-white text-sm`}
-                  >
-                    {t.avatar}
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-900 dark:text-gray-100">{t.name}</div>
-                    <div className="text-xs text-gray-400 dark:text-gray-500">{t.role}</div>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
 
       {/* ─── Pricing ─── */}
       <section id="pricing" className="scroll-mt-24 py-24 px-4 sm:px-6 lg:px-8 bg-white dark:bg-gray-950">
@@ -803,70 +589,6 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ─── Docs ─── */}
-      <section id="docs" className="scroll-mt-24 py-24 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-12">
-            <span className="text-sm text-violet-600 bg-violet-50 dark:bg-violet-900/30 dark:border-violet-700 px-3 py-1 rounded-full border border-violet-100">
-              {isVi ? "Tài liệu" : "Docs"}
-            </span>
-            <h2 className="text-4xl text-gray-900 dark:text-gray-100 mt-4 mb-4 tracking-tight">
-              {isVi ? "Tài liệu cần thiết để triển khai nhanh" : "Everything you need to ship fast"}
-            </h2>
-            <p className="text-gray-500 dark:text-gray-400 max-w-2xl mx-auto">
-              {isVi
-                ? "Sử dụng các hướng dẫn này để tích hợp mô hình phụ đề tiếng Anh và luồng realtime editor hiện tại."
-                : "Use these guides to integrate the current English subtitle model and realtime editor flow."}
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {localizedDocsItems.map((item) => (
-              <div
-                key={item.title}
-                className="bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-800 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow"
-              >
-                <h3 className="text-gray-900 dark:text-gray-100 mb-2">{item.title}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ─── CTA Banner ─── */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-700">
-        <div className="max-w-4xl mx-auto text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-          >
-            <h2 className="text-4xl text-white mb-4 tracking-tight">
-              Start generating subtitles today
-            </h2>
-            <p className="text-violet-200 mb-8 text-lg">
-              Join 50,000+ creators using SubAI. No credit card required.
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link
-                to="/upload"
-                className="flex items-center gap-2 bg-white text-violet-700 hover:bg-violet-50 px-8 py-3.5 rounded-xl shadow-lg transition-all"
-              >
-                <Zap className="w-4 h-4" />
-                Upload Your First Video
-              </Link>
-              <Link
-                to="/upload"
-                className="flex items-center gap-2 text-white border border-violet-400 hover:border-white px-8 py-3.5 rounded-xl transition-all"
-              >
-                <Play className="w-4 h-4" />
-                Try Demo
-              </Link>
-            </div>
-          </motion.div>
-        </div>
-      </section>
     </div>
   );
 }

@@ -25,7 +25,7 @@ payment_bp = Blueprint("payment", __name__)
 def create_order():
     """
     POST /api/payment/create-order
-    Creates a MoMo payment order for premium upgrade (99,000 VND lifetime).
+    Creates a MoMo payment order for premium upgrade (99,000 VND a year).
     Returns { payment_url } to redirect user to MoMo checkout.
     """
     profile = get_profile(g.user_id)

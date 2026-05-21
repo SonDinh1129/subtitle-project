@@ -21,7 +21,7 @@ Tất cả biểu đồ dưới đây viết bằng cú pháp Mermaid. Copy vào
 13. [UC-28: Export Video Burned Subtitle](#uc-28-export-video-burned-subtitle)
 14. [UC-29: Xem thông tin tài khoản](#uc-29-xem-thông-tin-tài-khoản)
 15. [UC-30: Đăng xuất](#uc-30-đăng-xuất)
-16. [UC-31: Tạo Order Nâng cấp Premium](#uc-31-tạo-order-nâng-cấp-premium)
+16. [UC-31: Tạo Order Nâng cấp Premium](#uc-31-tạo-order-nâng-cấp-premium) x
 17. [UC-36: Webhook & Xác nhận Premium](#uc-36-webhook--xác-nhận-premium)
 18. [UC-37: Colab VM2 xử lý ASR + MT (Normal)](#uc-37-colab-vm2-xử-lý-asr--mt-normal-mode)
 19. [UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-38-colab-vm2--vi-realtime-websocket-phowhisper)
@@ -30,7 +30,7 @@ Tất cả biểu đồ dưới đây viết bằng cú pháp Mermaid. Copy vào
 
 ---
 
-## UC-04: Đăng ký bằng Email
+## UC-04: Đăng ký bằng Email v
 
 ```mermaid
 sequenceDiagram
@@ -72,7 +72,7 @@ sequenceDiagram
 
 ---
 
-## UC-05: Đăng ký bằng Google OAuth
+## UC-05: Đăng ký bằng Google OAuth v
 
 Áp dụng tương tự cho UC-06 (GitHub), UC-08 (Google login), UC-09 (GitHub login).
 
@@ -99,7 +99,7 @@ sequenceDiagram
 
 ---
 
-## UC-07: Đăng nhập bằng Email
+## UC-07: Đăng nhập bằng Email v
 
 ```mermaid
 sequenceDiagram
@@ -127,7 +127,7 @@ sequenceDiagram
 
 ---
 
-## UC-10: Quên mật khẩu
+## UC-10: Quên mật khẩu v
 
 ```mermaid
 sequenceDiagram
@@ -166,7 +166,7 @@ sequenceDiagram
 
 ---
 
-## UC-11: Truy cập trang Protected
+## UC-11: Truy cập trang Protected v
 
 ```mermaid
 sequenceDiagram
@@ -195,7 +195,7 @@ sequenceDiagram
 
 ---
 
-## UC-12/13/15: Upload & Xử lý Normal Mode
+## UC-12/13/15: Upload & Xử lý Normal Mode v
 
 ```mermaid
 sequenceDiagram
@@ -239,7 +239,7 @@ sequenceDiagram
 
 ---
 
-## UC-14/16: Free User bị chặn
+## UC-14/16: Free User bị chặn v
 
 ```mermaid
 sequenceDiagram
@@ -268,7 +268,7 @@ sequenceDiagram
 
 ---
 
-## UC-32/33A: Realtime — Upload & SSE Stream
+## UC-32/33A: Realtime — Upload & SSE Stream v
 
 ```mermaid
 sequenceDiagram
@@ -304,7 +304,7 @@ sequenceDiagram
 
 ---
 
-## UC-32/33B: Realtime — WebSocket Detail (EN / VI)
+## UC-32/33B: Realtime — WebSocket Detail (EN / VI) v
 
 ```mermaid
 sequenceDiagram
@@ -337,7 +337,7 @@ sequenceDiagram
 
 ---
 
-## UC-17: Editor — Tải & Hiển thị subtitle
+## UC-17: Editor — Tải & Hiển thị subtitle v
 
 ```mermaid
 sequenceDiagram
@@ -365,7 +365,7 @@ sequenceDiagram
 
 ---
 
-## UC-18/19/20: Editor — Chỉnh sửa subtitle
+## UC-18/19/20: Editor — Chỉnh sửa subtitle v
 
 ```mermaid
 sequenceDiagram
@@ -393,7 +393,7 @@ sequenceDiagram
 
 ---
 
-## UC-26/27: Download SRT
+## UC-26/27: Download SRT v
 
 ```mermaid
 sequenceDiagram
@@ -420,7 +420,7 @@ sequenceDiagram
 
 ---
 
-## UC-28: Export Video Burned Subtitle
+## UC-28: Export Video Burned Subtitle v
 
 ```mermaid
 sequenceDiagram
@@ -454,7 +454,7 @@ sequenceDiagram
 
 ---
 
-## UC-29: Xem thông tin tài khoản
+## UC-29: Xem thông tin tài khoản v
 
 ```mermaid
 sequenceDiagram
@@ -483,7 +483,7 @@ sequenceDiagram
 
 ---
 
-## UC-30: Đăng xuất
+## UC-30: Đăng xuất v
 
 ```mermaid
 sequenceDiagram
@@ -504,7 +504,7 @@ sequenceDiagram
 
 ---
 
-## UC-31: Tạo Order Nâng cấp Premium
+## UC-31: Tạo Order Nâng cấp Premium x
 
 ```mermaid
 sequenceDiagram
@@ -572,7 +572,7 @@ sequenceDiagram
 
 ---
 
-## UC-37: Colab VM2 xử lý ASR + MT (Normal Mode)
+## UC-37: Colab VM2 xử lý ASR + MT (Normal Mode) v
 
 ```mermaid
 sequenceDiagram
@@ -615,7 +615,7 @@ sequenceDiagram
 
 ---
 
-## UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)
+## UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper) v
 
 ```mermaid
 sequenceDiagram
@@ -643,7 +643,7 @@ sequenceDiagram
 
 ---
 
-## UC-39: Health Check
+## UC-39: Health Check v
 
 ```mermaid
 sequenceDiagram
@@ -676,7 +676,7 @@ sequenceDiagram
 
 ---
 
-## UC-40: Colab VM1 — EN Realtime WebSocket (Kyutai)
+## UC-40: Colab VM1 — EN Realtime WebSocket (Kyutai) v
 
 ```mermaid
 sequenceDiagram

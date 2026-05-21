@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { AuthRightPanel } from "../components/AuthRightPanel";
 import { useUiPreferences } from "../context/UiPreferencesContext";
-import { signInWithGoogle } from "../../lib/supabase";
+import { supabase, signInWithGoogle } from "../../lib/supabase";
 
 export function SignInPage() {
   const navigate = useNavigate();

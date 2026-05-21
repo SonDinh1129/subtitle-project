@@ -30,7 +30,6 @@ export function Header() {
     { label: isVi ? "Trang chủ" : "Home", href: "/" },
     { label: isVi ? "Tính năng" : "Features", href: "/#features" },
     { label: isVi ? "Giá" : "Pricing", href: "/#pricing" },
-    { label: isVi ? "Tài liệu" : "Docs", href: "/#docs" },
   ];
 
   const isActive = (href: string) => {

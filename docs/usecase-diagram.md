@@ -90,20 +90,20 @@ Premium --|> Free
 rectangle "SubAI" {
 
   package "Upload & Xử lý" {
-    usecase "Upload Normal (UC-12/13/15)"  as UC12
-    usecase "Upload Realtime (UC-32/33)"   as UC32
-    usecase "Bị chặn / Limit (UC-14/16)"  as UC14
-    usecase "Kiểm tra xác thực (UC-11)"   as UC11
+    usecase "Upload Normal "  as UC12
+    usecase "Upload Realtime "   as UC32
+    usecase "Bị chặn / Limit "  as UC14
+    usecase "Kiểm tra xác thực "   as UC11
   }
 
   package "Editor" {
-    usecase "Xem video + subtitle (UC-17)"     as UC17
-    usecase "Chỉnh sửa subtitle (UC-18/19/20)" as UC18
+    usecase "Xem video + subtitle "     as UC17
+    usecase "Chỉnh sửa subtitle " as UC18
   }
 
   package "Xuất kết quả" {
-    usecase "Download SRT (UC-26/27)"     as UC26
-    usecase "Export video burned (UC-28)" as UC28
+    usecase "Download SRT "     as UC26
+    usecase "Export video burned " as UC28
   }
 
 }
@@ -169,13 +169,13 @@ Premium --|> Free
 rectangle "SubAI" {
 
   package "Tài khoản" {
-    usecase "Xem thông tin tài khoản (UC-29)" as UC29
-    usecase "Đăng xuất (UC-30)"               as UC30
-    usecase "Nâng cấp Premium (UC-31)"        as UC31
+    usecase "Xem thông tin tài khoản" as UC29
+    usecase "Đăng xuất"               as UC30
+    usecase "Nâng cấp Premium"        as UC31
   }
 
   package "Thanh toán" {
-    usecase "Webhook xác nhận (UC-36)" as UC36
+    usecase "Webhook xác nhận" as UC36
   }
 
 }
@@ -184,7 +184,7 @@ Free --> UC29
 Free --> UC30
 Free --> UC31
 
-PayOS --> UC36
+Momo --> UC36
 
 UC31 ..> UC36 : <<include>>
 
