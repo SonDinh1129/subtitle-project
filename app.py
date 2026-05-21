@@ -115,6 +115,10 @@ if __name__ == "__main__":
     # Load VAD model before accepting requests
     load_vad()
 
+    from models.cleanup import start_cleanup_daemon
+    from models.subtitle_model import UPLOAD_DIR, OUTPUT_DIR
+    start_cleanup_daemon([UPLOAD_DIR, OUTPUT_DIR], retention_days=7)
+
     application = create_app()
 
     port  = int(os.getenv("PORT", 5000))
