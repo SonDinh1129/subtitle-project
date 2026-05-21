@@ -78,9 +78,10 @@ export async function authFetch(path: string, init: RequestInit = {}): Promise<R
 export type JobStatus =
   | "queued"
   | "extracting"
-  | "vad"
   | "transcribing"
-  | "generating"
+  | "translating"
+  | "aligning"
+  | "generating_srt"
   | "done"
   | "error";
 
@@ -170,13 +171,14 @@ export interface ExportResponse {
 // ─── Status messages (hiển thị trên UI) ─────────────────────────────────────
 
 export const STATUS_MESSAGES: Record<JobStatus, string> = {
-  queued:       "Đang xếp hàng...",
-  extracting:   "Trích xuất âm thanh...",
-  vad:          "Phát hiện giọng nói (VAD)...",
-  transcribing: "AI đang nhận dạng & dịch thuật...",
-  generating:   "Tạo file phụ đề...",
-  done:         "Hoàn tất!",
-  error:        "Đã xảy ra lỗi",
+  queued:         "Đang xếp hàng...",
+  extracting:     "Trích xuất âm thanh...",
+  transcribing:   "AI đang nhận dạng & dịch thuật...",
+  translating:    "Đang dịch...",
+  aligning:       "Đang căn chỉnh...",
+  generating_srt: "Tạo file phụ đề...",
+  done:           "Hoàn tất!",
+  error:          "Đã xảy ra lỗi",
 };
 
 // ─── API calls ────────────────────────────────────────────────────────────────
@@ -304,11 +306,14 @@ export function pollUntilDone(
 }
 
 /**
- * GET /api/jobs/:jobId/download/:lang
- * Trả về URL để tải SRT.
+ * GET /api/jobs/:jobId/srt-url?lang=en|vi
+ * Fetch a short-lived signed URL for the SRT file in Supabase Storage.
  */
-export function getSrtUrl(jobId: string, lang: "en" | "vi"): string {
-  return `${BASE}/jobs/${jobId}/download/${lang}`;
+export async function getSrtUrl(jobId: string, lang: "en" | "vi"): Promise<string> {
+  const res = await authFetch(`/jobs/${jobId}/srt-url?lang=${lang}`);
+  if (!res.ok) throw new Error(`SRT URL fetch failed (${res.status})`);
+  const data = await res.json() as { url: string; expires_in: number };
+  return data.url;
 }
 
 /**
@@ -331,12 +336,15 @@ export async function exportVideo(
   return res.json();
 }
 
-/** Trigger browser download của SRT. */
-export function downloadSrt(jobId: string, lang: "en" | "vi") {
-  Object.assign(document.createElement("a"), {
-    href: getSrtUrl(jobId, lang),
-    download: `subtitles_${lang}.srt`,
-  }).click();
+/** Trigger browser download of the SRT from Supabase Storage signed URL. */
+export async function downloadSrt(jobId: string, lang: "en" | "vi"): Promise<void> {
+  const url = await getSrtUrl(jobId, lang);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `subtitles_${lang}.srt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 // ─── Helper: Word[] → Subtitle[] (dùng trong EditorPage) ────────────────────
