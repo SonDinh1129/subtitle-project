@@ -9,7 +9,6 @@ import {
   Star,
   ArrowRight,
   CheckCircle2,
-  Play,
   Languages,
   Sparkles,
   Shield,
@@ -294,13 +293,6 @@ export function LandingPage() {
                 <Zap className="w-4 h-4" />
                 {isVi ? "Tải video — Miễn phí" : "Upload Video — It's Free"}
                 <ArrowRight className="w-4 h-4" />
-              </Link>
-              <Link
-                to="/upload"
-                className="flex items-center gap-2 text-gray-700 bg-white border border-gray-200 hover:border-gray-300 px-7 py-3.5 rounded-xl shadow-sm hover:shadow-md transition-all"
-              >
-                <Play className="w-4 h-4 text-violet-600" />
-                {isVi ? "Thử demo" : "Try Demo"}
               </Link>
             </motion.div>
 

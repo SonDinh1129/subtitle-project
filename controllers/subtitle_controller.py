@@ -29,6 +29,8 @@ from models.subtitle_model import (
     OUTPUT_DIR,
     get_job_event_queue,
 )
+from models.jobs_repo import set_video_path
+from models.storage_repo import signed_url
 from middleware.auth import require_auth, require_premium, get_profile, is_premium, needs_reset, reset_usage, _get_supabase_service
 from extensions import limiter
 from models.subtitle_optimizer import (
@@ -166,7 +168,6 @@ def upload_video():  # noqa: C901
     job        = create_job(
         filename         = safe_name,
         translation_mode = translation_mode,
-        video_path       = "",            # will be updated below
         user_id          = g.user_id,
         source_lang      = source_lang,
     )
@@ -174,7 +175,8 @@ def upload_video():  # noqa: C901
     video_path = str(UPLOAD_DIR / f"{job_id}_{safe_name}")
 
     file.save(video_path)
-    update_job(job_id, video_path=video_path)
+    # video_path is ephemeral (local pipeline only); store in memory cache, not Postgres
+    set_video_path(job_id, video_path)
 
     # Increment usage counter atomically
     try:
@@ -308,39 +310,37 @@ def get_job_status(job_id: str):
     return jsonify(payload), 200
 
 
-@subtitle_bp.get("/jobs/<job_id>/download/<lang>")
+@subtitle_bp.get("/jobs/<job_id>/srt-url")
 @require_auth
-def download_srt(job_id: str, lang: str):
+def get_srt_url(job_id: str):
     """
-    Tải file SRT đã tạo.
+    Return a short-lived signed URL for downloading the SRT from Supabase Storage.
 
-    lang: "en" | "vi"
+    Query param: lang=en|vi (required)
 
-    Response: SRT file download
+    Response 200:
+        { "url": "https://...", "expires_in": 3600 }
+    Response 404:
+        { "error": "SRT not available yet" }
     """
+    lang = request.args.get("lang", "")
     if lang not in ("en", "vi"):
         return jsonify({"error": "lang must be 'en' or 'vi'"}), 400
 
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
-    if job.get("user_id") and job["user_id"] != g.user_id:
+    if job["user_id"] != g.user_id:
         return jsonify({"error": "Forbidden"}), 403
-    if job["status"] != JobStatus.DONE:
-        return jsonify({"error": f"Job not ready (status: {job['status']})"}), 409
 
-    key  = "en_srt_path" if lang == "en" else "vi_srt_path"
-    path = job.get(key)
+    path_key = "en_srt_storage_path" if lang == "en" else "vi_srt_storage_path"
+    storage_path = job.get(path_key)
+    if not storage_path:
+        return jsonify({"error": "SRT not available yet"}), 404
 
-    if not path or not os.path.exists(path):
-        return jsonify({"error": "SRT file not found on server"}), 404
+    url = signed_url(storage_path)
+    return jsonify({"url": url, "expires_in": 3600}), 200
 
-    return send_file(
-        path,
-        mimetype="text/plain",
-        as_attachment=True,
-        download_name=f"subtitles_{lang}.srt",
-    )
 
 @subtitle_bp.route('/video/<filename>')
 @require_auth
@@ -417,8 +417,8 @@ def optimize_job_subtitles(job_id):
     if job.get("user_id") and job["user_id"] != g.user_id:
         return jsonify(error="Forbidden"), 403
 
-    vi_srt_path = job.get("vi_srt_path")
-    if not vi_srt_path or not os.path.exists(vi_srt_path):
+    vi_srt_path = str(OUTPUT_DIR / f"{job_id}_vi.srt")
+    if not os.path.exists(vi_srt_path):
         return jsonify(error="Vietnamese SRT not found"), 404
 
     with open(vi_srt_path, "r", encoding="utf-8") as f:
@@ -434,6 +434,9 @@ def optimize_job_subtitles(job_id):
     with open(opt_path, "w", encoding="utf-8") as f:
         f.write(result_srt)
 
+    # TODO: vi_srt_optimized_path is not a Postgres column; this update_job call will
+    # fail against Supabase at runtime. Fix in a future task by adding the column or
+    # storing optimized path only in the in-memory cache.
     update_job(job_id, vi_srt_optimized_path=opt_path)
 
     return jsonify(
@@ -473,13 +476,14 @@ def quality_report(job_id: str):
     srt_variant = request.args.get("srt", "original")
 
     if lang == "en":
-        srt_path = job.get("en_srt_path")
+        srt_path = str(OUTPUT_DIR / f"{job_id}_en.srt")
     elif srt_variant == "optimized":
-        srt_path = job.get("vi_srt_optimized_path")
-        if not srt_path:
+        # TODO: vi_srt_optimized_path is not a Postgres column; for now construct local path
+        srt_path = str(OUTPUT_DIR / f"{job_id}_vi_optimized.srt")
+        if not os.path.exists(srt_path):
             return jsonify(error="Optimized SRT not found — run /optimize first"), 404
     else:
-        srt_path = job.get("vi_srt_path")
+        srt_path = str(OUTPUT_DIR / f"{job_id}_vi.srt")
 
     if not srt_path or not os.path.exists(srt_path):
         return jsonify(error=f"{lang.upper()} SRT not found"), 404

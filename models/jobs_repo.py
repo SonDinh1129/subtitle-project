@@ -104,3 +104,14 @@ def get_job_event_queue(job_id: str) -> queue.Queue:
 def emit_job_event(job_id: str, event: dict) -> None:
     """Put an event dict onto the job's SSE event queue."""
     get_job_event_queue(job_id).put(dict(event))
+
+
+def set_video_path(job_id: str, video_path: str) -> None:
+    """Store video_path in the in-memory cache only (not persisted to Postgres).
+
+    video_path is an ephemeral local path used by the pipeline; it is not a
+    Postgres column and must not be passed to update_job().
+    """
+    with _jobs_lock:
+        if job_id in _jobs:
+            _jobs[job_id]["video_path"] = video_path
