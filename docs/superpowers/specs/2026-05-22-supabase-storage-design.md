@@ -1,7 +1,7 @@
 # Supabase Storage + Postgres `jobs` Migration
 
 **Date:** 2026-05-22
-**Status:** Draft — awaiting user review
+**Status:** Revised — SRT-only Storage (export MP4 stays local due to Supabase free tier 50 MB/object limit)
 **Scope:** Hybrid migration from local file storage (`uploads/`, `outputs/`, `jobs/*.json`) to Supabase Storage (files) + Postgres (metadata).
 
 ---
@@ -23,10 +23,11 @@ Goal: persist long-lived artifacts and queryable metadata in Supabase, keep ephe
 
 - Bucket `subtitle-files` on Supabase Storage (private).
 - Table `public.jobs` on Supabase Postgres.
-- Upload SRT (en + vi) and burned-subtitle export MP4 to Storage at appropriate pipeline points.
+- Upload SRT (en + vi) to Storage at end of pipeline.
 - Refactor `create_job` / `get_job` / `update_job` to read/write Postgres instead of JSON files.
-- Refactor `download_srt`, `export_video`, `download_exported_video` endpoints to serve via signed URLs.
-- Delete local video + audio after pipeline completes; delete local SRT/export after configurable retention (7 days).
+- Refactor `download_srt` endpoint to serve SRT via signed URL (JSON response).
+- Delete local video + audio after pipeline completes; delete local SRT after configurable retention (7 days).
+- Export MP4 (`/api/export`) is **unchanged** — render locally, stream directly, delete local file. Supabase free tier caps Storage objects at 50 MB; burned-subtitle exports routinely exceed this.
 
 **Out of scope:**
 
@@ -39,20 +40,18 @@ Goal: persist long-lived artifacts and queryable metadata in Supabase, keep ephe
 
 Bucket: `subtitle-files`, **private** (no public access).
 
-Object key convention:
+Object key convention (SRT only — export MP4 not stored in Storage):
 
 ```
 {user_id}/{job_id}/en.srt
 {user_id}/{job_id}/vi.srt
-{user_id}/{job_id}/export_{resolution}_{lang}.mp4
 ```
 
 Examples:
 
 ```
 87813ab3-dd37-.../46286bd8-.../en.srt
-87813ab3-dd37-.../46286bd8-.../export_720p_vi.mp4
-87813ab3-dd37-.../46286bd8-.../export_1080p_en.mp4
+87813ab3-dd37-.../46286bd8-.../vi.srt
 ```
 
 Access model: bucket is **private**. Clients never list or write directly to Storage and never call `supabase.storage.from_(...).download(...)` from the browser. Backend uses the service-role key to upload objects and generate short-lived signed URLs that the client follows. An owner-based Storage SELECT policy may be added later for direct-read use cases, but the current API path relies exclusively on backend-issued signed URLs — see §6 for authorization at the application layer.
@@ -92,8 +91,6 @@ create table public.jobs (
   en_srt_storage_path  text,
   vi_srt_storage_path  text,
 
-  exports           jsonb not null default '{}'::jsonb,
-
   error             text,
 
   completed_at      timestamptz,
@@ -128,17 +125,7 @@ for each row execute function public.set_updated_at();
 ### Notes on schema decisions
 
 - **`status` enum kept short.** `uploading` was considered as a separate state to cover the "DB done but Storage not yet written" race. Rejected: SRT upload takes <1s, would never be observable, and atomicity is guaranteed by code ordering (§7) — `status='done'` is only written *after* both Storage uploads succeed.
-- **`exports jsonb`** keyed by `{resolution}_{lang}`. Example value:
-  ```json
-  {
-    "720p_vi": {
-      "path": "user_id/job_id/export_720p_vi.mp4",
-      "created_at": "2026-05-22T10:00:00Z",
-      "size": 123456789
-    }
-  }
-  ```
-  Enables idempotent re-export (§8).
+- **No `exports` column.** Export MP4 is not stored in Supabase Storage (Supabase free tier limits objects to 50 MB; burned-subtitle exports regularly exceed this). Export flow is unchanged: render locally → stream to client → delete local file. See §6.
 - **Transcript + words kept in `jobs`.** Postgres TOAST stores oversized JSONB out-of-row; list queries that `SELECT job_id, filename, status, progress, created_at, updated_at, error` will not pay the cost. If list latency becomes a problem, extract to `job_results` later — cheap migration.
 - **Two indexes**: `(user_id, created_at desc)` for history view, `(user_id, status)` for "active jobs" queries.
 - **`completed_at`** is set exactly once, at the moment `status` first transitions to `done`. Unlike `updated_at` (which moves every time the user triggers a new export), `completed_at` is a stable anchor for "when did this job finish" — used by retention/cleanup logic and any future history UI. Not enforced by constraint; pipeline code is responsible for setting it.
@@ -154,8 +141,8 @@ for each row execute function public.set_updated_at();
 | SRT generated locally | video + audio | en.srt, vi.srt | — | `generating_srt` |
 | SRT uploaded | **deleted** | en.srt, vi.srt | en.srt, vi.srt | (intermediate, not persisted) |
 | Pipeline finalize | — | en.srt, vi.srt | en.srt, vi.srt | `done` (with storage paths set) |
-| `/api/export` called | — | export.mp4 (temp) | + export_{res}_{lang}.mp4 | (unchanged status) |
-| After 7 days | — | SRT/export removed | retained | (unchanged) |
+| `/api/export` called | — | export.mp4 (temp, deleted after stream) | — (not stored) | (unchanged status) |
+| After 7 days | — | SRT local files removed | SRT retained | (unchanged) |
 
 Failure path: any exception → `status='error'`, `error=str(exc)`. Local files left in place for inspection (cleanup will eventually remove them).
 
@@ -193,21 +180,15 @@ Rationale for JSON over 302 redirect: avoids JWT exposure in `?token=` query (cu
 
 Returns 404 if the job has no `{lang}_srt_storage_path` yet (i.e., pipeline not done or still uploading).
 
-### `POST /api/jobs/{job_id}/export` *(replaces `POST /api/export`)*
+### `POST /api/export` *(unchanged)*
 
-Body: `{ "resolution": "720p", "lang": "vi" }`.
+Export MP4 is **not stored in Supabase Storage** due to the 50 MB/object limit on the free tier. The existing flow is kept: render burned-subtitle MP4 to local `outputs/` → stream directly to client via `send_file` → delete local file. No signed URL, no Storage upload, no `exports` JSONB column.
 
-1. Authorize ownership.
-2. Check `jobs.exports->'{resolution}_{lang}'`. If present, generate a fresh signed URL from the stored `path` and return it. Skip rendering.
-3. Otherwise: render burned-subtitle MP4 to local `outputs/`.
-4. Upload to Storage at `{user_id}/{job_id}/export_{resolution}_{lang}.mp4`.
-5. Update `jobs.exports` via `jsonb_set` to add `{resolution}_{lang}` entry.
-6. Delete local MP4.
-7. Return signed URL.
+The endpoint path and request/response contract remain identical to before this migration.
 
-### Legacy endpoints
+### Legacy endpoint removed
 
-`GET /api/exports/{filename}` and `GET /api/download/{job_id}` are removed in this PR (frontend updated in same PR — no consumers remain).
+`GET /api/jobs/{job_id}/download/<lang>` is replaced by `GET /api/jobs/{job_id}/srt-url`. Frontend updated in the same PR.
 
 ### `GET /api/video/{filename}` (legacy)
 
@@ -248,23 +229,7 @@ Failure modes covered:
 
 In all failure modes the invariant in the box above holds: `status='done'` is never visible without both Storage paths present and valid.
 
-For `/api/export`, same ordering: upload to Storage → update `exports` JSONB → delete local file. If DB update fails, local file lingers (cleanup removes it later); Storage object orphaned (acceptable, key collision on re-export is safe because key is deterministic).
-
-## 8. Idempotent export
-
-When `POST /api/export` is called with `(resolution, lang)`:
-
-1. `SELECT exports->'{res}_{lang}' FROM jobs WHERE job_id = ?`
-2. If present:
-   - Generate fresh signed URL from `path` field, return it.
-   - Skip rendering entirely.
-3. If absent: render → upload → store entry → return signed URL.
-
-Storage path is deterministic per `(user_id, job_id, resolution, lang)`, so re-render after a delete is safe — same path overwrites cleanly.
-
-**Concurrent export race (acknowledged, not fixed in v1):** if the user fires two `POST /api/jobs/{id}/export` calls with identical `(resolution, lang)` before the first finishes, both will see `exports->'{key}'` absent and render in parallel. Both uploads target the same deterministic Storage key, so the second simply overwrites the first — result is correct, just wasted CPU. Future fix: per-job export lock via Postgres advisory lock (`select pg_advisory_xact_lock(hashtext(job_id || ':' || export_key))`) at the start of the handler. Not implemented now (low frequency, no correctness impact).
-
-## 9. Local cleanup
+## 8. Local cleanup
 
 Two layers:
 

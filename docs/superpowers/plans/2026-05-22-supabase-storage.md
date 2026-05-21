@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move SRT files and burned-subtitle exports from local disk to Supabase Storage, and move job metadata from JSON files to a Postgres `jobs` table — without changing the upload UX or breaking the existing pipeline.
+**Goal:** Move SRT files to Supabase Storage and job metadata from JSON files to a Postgres `jobs` table — without changing the upload UX, export flow, or breaking the existing pipeline.
 
-**Architecture:** Hybrid. Pipeline still writes to `uploads/` and `outputs/` because ffmpeg/Whisper need local file paths. After SRT is generated, upload to Storage, then mark job `done`. Original video + audio are deleted immediately after a successful pipeline run. SRT/export files in `outputs/` are kept for 7 days then swept by a daemon. Frontend gets signed URLs via REST endpoints; it never talks to Storage directly.
+**Architecture:** Hybrid. Pipeline still writes to `uploads/` and `outputs/` because ffmpeg/Whisper need local file paths. After SRT is generated, upload to Storage, then mark job `done`. Original video + audio are deleted immediately after a successful pipeline run. SRT files in `outputs/` are kept for 7 days then swept by a daemon. **Export MP4 is NOT stored in Supabase Storage** (free tier caps objects at 50 MB; exports routinely exceed this) — export flow is unchanged. Frontend gets signed URLs for SRT download; it never talks to Storage directly.
 
 **Tech Stack:** Flask (existing), supabase-py (already in `middleware/auth.py`), Postgres (Supabase), Supabase Storage. Tests use pytest with stubbed heavy dependencies (see `tests/conftest.py`).
 
@@ -25,10 +25,10 @@
 
 **Modified files:**
 - `models/subtitle_model.py` — Remove `create_job`/`get_job`/`update_job`/`_persist_job`/`JOBS_DIR` (move to `jobs_repo`). Add Storage upload + local cleanup at end of `run_pipeline` and `run_pipeline_realtime`. Rename `JobStatus.VAD` → keep `EXTRACTING` only; rename `JobStatus.GENERATING` → `GENERATING_SRT`.
-- `controllers/subtitle_controller.py` — Replace `download_srt`, `export_video`, `download_exported_video`, `serve_video` with new REST endpoints per spec §6. All job-scoped handlers run the authorization check.
+- `controllers/subtitle_controller.py` — Replace `download_srt` with `GET /api/jobs/{id}/srt-url` returning JSON signed URL. `export_video` and `download_exported_video` are **unchanged**. Authorization check added to srt-url handler.
 - `app.py` — Wire cleanup daemon at startup.
-- `src/lib/api.ts` — New `getSrtUrl(jobId, lang)` and update `exportVideo()` to consume JSON `{url}`.
-- `src/app/pages/EditorPage.tsx` — Update SRT download + export download to follow signed URLs.
+- `src/lib/api.ts` — New `getSrtUrl(jobId, lang)`, replace old SRT download function.
+- `src/app/pages/EditorPage.tsx` — Update SRT download handler only (export unchanged).
 
 **Files NOT touched:**
 - `middleware/auth.py` — unchanged.
@@ -46,7 +46,7 @@ This is the only manual step. Everything else is code.
 In Supabase Dashboard → Storage → New bucket:
 - Name: `subtitle-files`
 - Public: **OFF**
-- File size limit: 500 MB (covers 1080p exports)
+- File size limit: 50 MB (SRT files are only a few KB; this is the free-tier cap and is sufficient)
 
 No policies needed — backend uses service-role key.
 
@@ -71,7 +71,6 @@ create table public.jobs (
   vietnamese_words  jsonb,
   en_srt_storage_path  text,
   vi_srt_storage_path  text,
-  exports           jsonb not null default '{}'::jsonb,
   error             text,
   completed_at      timestamptz,
   created_at        timestamptz not null default now(),
@@ -105,7 +104,7 @@ Run in SQL Editor:
 ```sql
 select column_name, data_type from information_schema.columns where table_name='jobs';
 ```
-Expected: 20 rows including `exports` (jsonb), `completed_at` (timestamptz).
+Expected: 19 rows including `en_srt_storage_path` (text), `completed_at` (timestamptz). No `exports` column.
 
 ---
 
@@ -759,99 +758,7 @@ git commit -m "feat(api): replace /download with /jobs/{id}/srt-url signed-URL e
 
 ---
 
-## Task 7: Refactor `export_video` endpoint with idempotency
-
-Move to `POST /api/jobs/{job_id}/export`, add cache check on `exports` JSONB, upload to Storage, delete local.
-
-**Files:**
-- Modify: `controllers/subtitle_controller.py:351-402` (`export_video` and `download_exported_video`)
-
-- [ ] **Step 7.1: Replace `export_video`**
-
-Replace the entire `export_video` function with:
-
-```python
-@subtitle_bp.post("/jobs/<job_id>/export")
-@require_auth
-def export_video(job_id: str):
-    """Render (or fetch cached) burned-subtitle video and return signed URL."""
-    payload = request.get_json(silent=True) or {}
-    resolution = payload.get("resolution", "720p")
-    lang = payload.get("lang", "vi")
-
-    if resolution not in ("360p", "720p", "1080p"):
-        return jsonify({"error": "resolution must be one of: 360p, 720p, 1080p"}), 400
-    if lang not in ("en", "vi"):
-        return jsonify({"error": "lang must be 'en' or 'vi'"}), 400
-
-    job = get_job(job_id)
-    if not job:
-        return jsonify({"error": "Job not found"}), 404
-    if job.get("user_id") != g.user_id:
-        return jsonify({"error": "Forbidden"}), 403
-    if job["status"] != JobStatus.DONE:
-        return jsonify({"error": f"Job not ready (status: {job['status']})"}), 409
-
-    export_key = f"{resolution}_{lang}"
-    exports = job.get("exports") or {}
-    cached = exports.get(export_key)
-    if cached and cached.get("path"):
-        url = storage_repo.signed_url(cached["path"], expires_in=3600)
-        return jsonify({"url": url, "expires_in": 3600, "cached": True}), 200
-
-    # Render burned-subtitle MP4 locally.
-    try:
-        local_path = export_burned_video(job, resolution=resolution, lang=lang)
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-    storage_path = f"{job['user_id']}/{job_id}/export_{export_key}.mp4"
-    storage_repo.upload_file(local_path, storage_path)
-
-    # Update exports JSONB.
-    from datetime import datetime, timezone
-    file_size = os.path.getsize(local_path)
-    new_exports = dict(exports)
-    new_exports[export_key] = {
-        "path": storage_path,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "size": file_size,
-    }
-    update_job(job_id, exports=new_exports)
-
-    # Delete local file.
-    try:
-        os.remove(local_path)
-    except OSError:
-        pass
-
-    url = storage_repo.signed_url(storage_path, expires_in=3600)
-    return jsonify({"url": url, "expires_in": 3600, "cached": False}), 200
-```
-
-- [ ] **Step 7.2: Delete the legacy endpoints**
-
-Remove [controllers/subtitle_controller.py:345-348](controllers/subtitle_controller.py#L345-L348) (`serve_video`) entirely.
-
-Remove the legacy `download_exported_video` route ([controllers/subtitle_controller.py:390-402](controllers/subtitle_controller.py#L390-L402)) entirely.
-
-- [ ] **Step 7.3: Smoke-test**
-
-```
-python -c "from app import create_app; app = create_app(); print([r.rule for r in app.url_map.iter_rules() if 'export' in r.rule or 'video' in r.rule])"
-```
-Expected: `/api/jobs/<job_id>/export` present; `/api/exports/...` and `/api/video/...` absent.
-
-- [ ] **Step 7.4: Commit**
-
-```bash
-git add controllers/subtitle_controller.py
-git commit -m "feat(api): replace /export with idempotent /jobs/{id}/export, drop legacy routes"
-```
-
----
-
-## Task 8: Local-disk cleanup daemon
+## Task 7: Local-disk cleanup daemon
 
 Sweep `outputs/` and `uploads/` for files older than 7 days. Run at app start + every 24h.
 
@@ -860,7 +767,7 @@ Sweep `outputs/` and `uploads/` for files older than 7 days. Run at app start + 
 - Create: `tests/test_cleanup.py`
 - Modify: `app.py` (start the daemon)
 
-- [ ] **Step 8.1: Write failing test**
+- [ ] **Step 7.1: Write failing test**
 
 Create `tests/test_cleanup.py`:
 
@@ -907,14 +814,14 @@ def test_cleanup_swallows_per_file_errors(tmp_path: Path, monkeypatch):
     cleanup.cleanup_local_outputs([tmp_path], retention_days=7)
 ```
 
-- [ ] **Step 8.2: Run the test to verify it fails**
+- [ ] **Step 7.2: Run the test to verify it fails**
 
 ```
 pytest tests/test_cleanup.py -v
 ```
 Expected: FAIL with `ModuleNotFoundError`.
 
-- [ ] **Step 8.3: Implement `models/cleanup.py`**
+- [ ] **Step 7.3: Implement `models/cleanup.py`**
 
 ```python
 """
@@ -980,14 +887,14 @@ def start_cleanup_daemon(
     return t
 ```
 
-- [ ] **Step 8.4: Run tests to verify pass**
+- [ ] **Step 7.4: Run tests to verify pass**
 
 ```
 pytest tests/test_cleanup.py -v
 ```
 Expected: 3 passed.
 
-- [ ] **Step 8.5: Wire daemon into `app.py`**
+- [ ] **Step 7.5: Wire daemon into `app.py`**
 
 Add to [app.py](app.py) inside `create_app()` (after blueprint registration, before `return app`):
 
@@ -998,14 +905,14 @@ Add to [app.py](app.py) inside `create_app()` (after blueprint registration, bef
     start_cleanup_daemon([UPLOAD_DIR, OUTPUT_DIR], retention_days=7)
 ```
 
-- [ ] **Step 8.6: Smoke-test app starts**
+- [ ] **Step 7.6: Smoke-test app starts**
 
 ```
 python -c "from app import create_app; create_app(); print('ok')"
 ```
 Expected: `ok` (daemon starts in background, returns immediately).
 
-- [ ] **Step 8.7: Commit**
+- [ ] **Step 7.7: Commit**
 
 ```bash
 git add models/cleanup.py tests/test_cleanup.py app.py
@@ -1014,7 +921,7 @@ git commit -m "feat(cleanup): local-disk retention sweeper, 7-day default"
 
 ---
 
-## Task 9: Frontend — update SRT download flow
+## Task 8: Frontend — update SRT download flow
 
 Replace direct-download GET with the new JSON-URL flow.
 
@@ -1022,7 +929,7 @@ Replace direct-download GET with the new JSON-URL flow.
 - Modify: `src/lib/api.ts` (add `getSrtUrl`, remove `downloadSrt`/old fn)
 - Modify: `src/app/pages/EditorPage.tsx` (caller)
 
-- [ ] **Step 9.1: Locate the current SRT download caller**
+- [ ] **Step 8.1: Locate the current SRT download caller**
 
 ```
 grep -n "download\|srt" src/lib/api.ts src/app/pages/EditorPage.tsx
@@ -1030,7 +937,7 @@ grep -n "download\|srt" src/lib/api.ts src/app/pages/EditorPage.tsx
 
 Find the existing function that hits `/api/jobs/{id}/download/{lang}`. Note its name and the EditorPage hook that calls it.
 
-- [ ] **Step 9.2: Replace API helper**
+- [ ] **Step 8.2: Replace API helper**
 
 In [src/lib/api.ts](src/lib/api.ts), remove the old SRT download function and add:
 
@@ -1051,7 +958,7 @@ export async function getSrtUrl(jobId: string, lang: "en" | "vi"): Promise<strin
 
 If `getAuthToken` doesn't exist by that name, use the same auth-token pattern the file already uses (search for `Bearer` in `api.ts`).
 
-- [ ] **Step 9.3: Update the EditorPage caller**
+- [ ] **Step 8.3: Update the EditorPage caller**
 
 In [src/app/pages/EditorPage.tsx](src/app/pages/EditorPage.tsx), replace the existing "download SRT" button handler with:
 
@@ -1074,14 +981,14 @@ const handleDownloadSrt = async (lang: "en" | "vi") => {
 
 Update the import line to include `getSrtUrl` and remove the now-unused old import.
 
-- [ ] **Step 9.4: Type-check**
+- [ ] **Step 8.4: Type-check**
 
 ```
 pnpm exec tsc --noEmit
 ```
 Expected: `TypeScript: No errors found`.
 
-- [ ] **Step 9.5: Commit**
+- [ ] **Step 8.5: Commit**
 
 ```bash
 git add src/lib/api.ts src/app/pages/EditorPage.tsx
@@ -1090,82 +997,11 @@ git commit -m "feat(web): consume signed-URL JSON for SRT download"
 
 ---
 
-## Task 10: Frontend — update export download flow
-
-Same pattern for `POST /api/jobs/{id}/export`.
-
-**Files:**
-- Modify: `src/lib/api.ts` (replace `exportVideo`)
-- Modify: `src/app/pages/EditorPage.tsx` (caller)
-
-- [ ] **Step 10.1: Replace `exportVideo` in api.ts**
-
-Find the existing `exportVideo` function (search for `/export` in `src/lib/api.ts`) and replace with:
-
-```typescript
-export async function exportVideo(
-  jobId: string,
-  resolution: "360p" | "720p" | "1080p",
-  lang: "en" | "vi",
-): Promise<{ url: string; cached: boolean }> {
-  const token = await getAuthToken();
-  const res = await fetch(`${BASE}/jobs/${encodeURIComponent(jobId)}/export`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ resolution, lang }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Export failed (${res.status})`);
-  }
-  const { url, cached } = await res.json();
-  return { url, cached };
-}
-```
-
-- [ ] **Step 10.2: Update EditorPage export handler**
-
-Find the existing export button handler in EditorPage and update it to use the returned `url`:
-
-```tsx
-const handleExport = async (resolution: "360p" | "720p" | "1080p", lang: "en" | "vi") => {
-  try {
-    const { url } = await exportVideo(jobId, resolution, lang);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `export_${resolution}_${lang}.mp4`;
-    a.click();
-  } catch (err) {
-    console.error(err);
-    alert(err instanceof Error ? err.message : "Export failed");
-  }
-};
-```
-
-- [ ] **Step 10.3: Type-check**
-
-```
-pnpm exec tsc --noEmit
-```
-Expected: `TypeScript: No errors found`.
-
-- [ ] **Step 10.4: Commit**
-
-```bash
-git add src/lib/api.ts src/app/pages/EditorPage.tsx
-git commit -m "feat(web): consume signed-URL JSON for export download"
-```
-
----
-
-## Task 11: End-to-end manual verification
+## Task 9: End-to-end manual verification
 
 No new code — exercise the full path against a real Supabase project.
 
-- [ ] **Step 11.1: Confirm env vars**
+- [ ] **Step 9.1: Confirm env vars**
 
 ```
 echo $env:SUPABASE_URL
@@ -1173,25 +1009,25 @@ echo $env:SUPABASE_SERVICE_ROLE_KEY
 ```
 Both must be set. If not, set them in the appropriate `.env` file the app reads.
 
-- [ ] **Step 11.2: Start the app**
+- [ ] **Step 9.2: Start the app**
 
 ```
 python app.py
 ```
 Expected: starts on the usual port without errors; log line shows the cleanup daemon thread.
 
-- [ ] **Step 11.3: Run the dev server**
+- [ ] **Step 9.3: Run the dev server**
 
 In a separate terminal:
 ```
 pnpm dev
 ```
 
-- [ ] **Step 11.4: Upload a short test video**
+- [ ] **Step 9.4: Upload a short test video**
 
 Use the UI: login, upload a 30-second MP4. Watch the SSE progress.
 
-- [ ] **Step 11.5: Verify Postgres row**
+- [ ] **Step 9.5: Verify Postgres row**
 
 In Supabase SQL Editor:
 ```sql
@@ -1202,11 +1038,11 @@ limit 1;
 ```
 Expected: `status='done'`, both storage paths non-null, `completed_at` set.
 
-- [ ] **Step 11.6: Verify Storage objects**
+- [ ] **Step 9.6: Verify Storage objects**
 
 In Supabase Dashboard → Storage → `subtitle-files`, navigate to `{user_id}/{job_id}/`. Expected: `en.srt` and `vi.srt` present.
 
-- [ ] **Step 11.7: Verify local cleanup**
+- [ ] **Step 9.7: Verify local cleanup**
 
 On the server filesystem:
 ```
@@ -1219,15 +1055,15 @@ ls outputs/ | findstr <job_id>
 ```
 Expected: `<job_id>_en.srt` and `<job_id>_vi.srt` still there (will be swept after 7 days).
 
-- [ ] **Step 11.8: Verify SRT download in Editor**
+- [ ] **Step 9.8: Verify SRT download in Editor**
 
 Click "Download SRT (en)" in the Editor. File should download with the correct content.
 
-- [ ] **Step 11.9: Verify export idempotency**
+- [ ] **Step 9.9: Verify export still works (unchanged flow)**
 
-In the Editor, click "Export 720p VI". Wait for download. Click the same button again — second call should be near-instant (server logs show no re-render). Inspect Network tab: second response includes `"cached": true`.
+In the Editor, click "Export 720p VI". File should download as before — `send_file` stream, no Storage involved.
 
-- [ ] **Step 11.10: Verify ownership check**
+- [ ] **Step 9.10: Verify ownership check**
 
 Open DevTools → Network → grab the `/api/jobs/{id}/srt-url?lang=en` request. Sign out, sign in as a different account, replay the request with `curl` using the new token. Expected: HTTP 403 with `{"error": "Forbidden"}`.
 
@@ -1238,17 +1074,17 @@ If any step fails, debug, fix, and re-run that step. Do not commit "verification
 ## Self-review checklist
 
 - ✅ **Spec coverage:**
-  - §3 Storage layout → Task 5 (path construction), Task 7 (export path).
-  - §4 DB schema → Task 0.2 + Task 1 (DDL).
-  - §5 Lifecycle → Tasks 5, 7, 8.
-  - §6 API + authorization → Tasks 6, 7.
+  - §3 Storage layout (SRT only) → Task 5 (path construction `{user_id}/{job_id}/en.srt`).
+  - §4 DB schema (no `exports` column) → Task 0.2 + Task 1 (DDL).
+  - §5 Lifecycle → Tasks 5, 7.
+  - §6 API + authorization → Task 6 (srt-url), export unchanged.
   - §7 Atomicity → Task 5 (upload-before-done ordering).
-  - §8 Idempotent export → Task 7 (cache check).
-  - §9 Cleanup → Task 8.
-  - §10 Known limitations → already documented in spec, no code action.
+  - §8 Cleanup → Task 7.
+  - §9 Known limitations → already documented in spec, no code action.
 - ✅ **No placeholders:** every code step shows the actual code; no "implement similar logic"; no "TODO".
 - ✅ **Type consistency:** `JobStatus.DONE = "done"`, `en_srt_storage_path` column name, `signed_url(path, expires_in)` signature, `getSrtUrl(jobId, lang)` TS signature — all match across tasks.
-- ✅ **Frequent commits:** every task ends with a commit; total 11 commits + 1 manual-verification task.
+- ✅ **Frequent commits:** every task ends with a commit; 9 tasks total (Tasks 1-8 + manual E2E).
+- ✅ **Export unchanged:** `POST /api/export` + `GET /api/exports/{filename}` + frontend export flow — none of these are touched.
 
 ---
 
