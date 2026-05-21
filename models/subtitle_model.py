@@ -9,7 +9,6 @@ Chịu trách nhiệm:
 """
 
 import os
-import uuid
 import time
 import json
 import base64
@@ -35,9 +34,8 @@ import websockets
 
 UPLOAD_DIR = Path("uploads")
 OUTPUT_DIR = Path("outputs")
-JOBS_DIR   = Path("jobs")
 
-for _d in [UPLOAD_DIR, OUTPUT_DIR, JOBS_DIR]:
+for _d in [UPLOAD_DIR, OUTPUT_DIR]:
     _d.mkdir(exist_ok=True)
 
 
@@ -46,87 +44,28 @@ for _d in [UPLOAD_DIR, OUTPUT_DIR, JOBS_DIR]:
 # ─────────────────────────────────────────────────────────────────
 
 class JobStatus:
-    QUEUED       = "queued"
-    EXTRACTING   = "extracting"
-    VAD          = "vad"
-    TRANSCRIBING = "transcribing"
-    GENERATING   = "generating"
-    DONE         = "done"
-    ERROR        = "error"
+    QUEUED         = "queued"
+    EXTRACTING     = "extracting"
+    TRANSCRIBING   = "transcribing"
+    TRANSLATING    = "translating"
+    ALIGNING       = "aligning"
+    GENERATING_SRT = "generating_srt"
+    DONE           = "done"
+    ERROR          = "error"
 
 
 # ─────────────────────────────────────────────────────────────────
-# JOB STORE  (in-memory + JSON on disk)
+# JOB STORE  (delegated to jobs_repo — Postgres-backed)
 # ─────────────────────────────────────────────────────────────────
 
-_jobs: dict = {}
-_jobs_lock  = threading.Lock()
-_job_event_queues: dict[str, queue.Queue] = {}
-_job_event_lock = threading.Lock()
-
-
-def create_job(filename: str, translation_mode: str, video_path: str, user_id: str | None = None, source_lang: str = "en") -> dict:
-    """Create a new job record and persist it."""
-    job = {
-        "job_id":           str(uuid.uuid4()),
-        "user_id":          user_id,
-        "filename":         filename,
-        "status":           JobStatus.QUEUED,
-        "progress":         0,
-        "translation_mode": translation_mode,
-        "source_lang":      source_lang,
-        "video_path":       video_path,
-        "created_at":       time.time(),
-        "error":            None,
-        # Populated when done:
-        "english_words":    [],
-        "vietnamese_words": [],
-        "english_text":     "",
-        "vietnamese_text":  "",
-        "en_srt_path":      None,
-        "vi_srt_path":      None,
-    }
-    _persist_job(job)
-    with _job_event_lock:
-        _job_event_queues[job["job_id"]] = queue.Queue()
-    return job
-
-
-def get_job(job_id: str) -> Optional[dict]:
-    with _jobs_lock:
-        if job_id in _jobs:
-            return dict(_jobs[job_id])
-    job_file = JOBS_DIR / f"{job_id}.json"
-    if job_file.exists():
-        with open(job_file, encoding="utf-8") as f:
-            return json.load(f)
-    return None
-
-
-def update_job(job_id: str, **fields) -> dict:
-    """Merge fields into an existing job and persist."""
-    job = get_job(job_id) or {}
-    job.update(fields)
-    _persist_job(job)
-    return job
-
-
-def _persist_job(job: dict):
-    with _jobs_lock:
-        _jobs[job["job_id"]] = dict(job)
-    path = JOBS_DIR / f"{job['job_id']}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(job, f, ensure_ascii=False, indent=2)
-
-
-def get_job_event_queue(job_id: str) -> queue.Queue:
-    with _job_event_lock:
-        return _job_event_queues.setdefault(job_id, queue.Queue())
-
-
-def emit_job_event(job_id: str, event: dict) -> None:
-    q = get_job_event_queue(job_id)
-    q.put(dict(event))
+from models.jobs_repo import (  # noqa: E402
+    create_job,
+    get_job,
+    update_job,
+    get_job_event_queue,
+    emit_job_event,
+)
+from models.storage_repo import upload_file
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -678,12 +617,6 @@ def _prepare_segments(audio_path: str, min_duration: float = 2.0) -> list[dict]:
     return encode_segments_for_colab(segments, wav)
 
 
-def _cleanup_job_queue(job_id: str) -> None:
-    """Remove the event queue for a completed/failed job to free memory."""
-    with _job_event_lock:
-        _job_event_queues.pop(job_id, None)
-
-
 def encode_segments_for_colab(
     segments: list[dict],
     wav_tensor: torch.Tensor,
@@ -773,9 +706,9 @@ def export_burned_video(job: dict, resolution: str, lang: str) -> str:
     if not video_path or not os.path.exists(video_path):
         raise FileNotFoundError("Source video not found")
 
-    srt_key = "en_srt_path" if lang == "en" else "vi_srt_path"
-    srt_path = job.get(srt_key)
-    if not srt_path or not os.path.exists(srt_path):
+    # Construct local SRT path from job_id (video_path is local-only, not in DB)
+    srt_path = str(OUTPUT_DIR / f"{job['job_id']}_{lang}.srt")
+    if not os.path.exists(srt_path):
         raise FileNotFoundError("Subtitle file not found")
 
     scale = resolution_map[resolution]
@@ -827,8 +760,8 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         update_job(job_id, status=JobStatus.EXTRACTING, progress=5)
         extract_audio(video_path, audio_path)
 
-        # ── Step 2: VAD ────────────────────────────────────────────
-        update_job(job_id, status=JobStatus.VAD, progress=20)
+        # ── Step 2: VAD (collapsed into EXTRACTING) ───────────────
+        update_job(job_id, status=JobStatus.EXTRACTING, progress=20)
 
         # ── Step 3: Encode + send to Colab ─────────────────────────
         update_job(job_id, status=JobStatus.TRANSCRIBING, progress=40)
@@ -840,8 +773,8 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         english_words    = result["english_words"]
         vietnamese_words = result["vietnamese_words"]
 
-        # ── Step 4: Generate SRT files ─────────────────────────────
-        update_job(job_id, status=JobStatus.GENERATING, progress=80)
+        # ── Step 4: Generate SRT files locally ────────────────────
+        update_job(job_id, status=JobStatus.GENERATING_SRT, progress=80)
 
         en_srt_content = words_to_srt_string(english_words)
         vi_srt_content = words_to_srt_string(vietnamese_words)
@@ -852,27 +785,37 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         save_srt(en_srt_content, en_srt_path)
         save_srt(vi_srt_content, vi_srt_path)
 
-        # ── Step 5: Done ───────────────────────────────────────────
+        # ── Step 5: Upload SRT to Storage, then mark done ─────────
+        # Atomicity: status='done' is only written after both uploads succeed.
+        user_id = job.get("user_id", "unknown")
+        en_storage_path = f"{user_id}/{job_id}/en.srt"
+        vi_storage_path = f"{user_id}/{job_id}/vi.srt"
+
+        upload_file(en_srt_path, en_storage_path)
+        upload_file(vi_srt_path, vi_storage_path)
+
         update_job(
             job_id,
-            status           = JobStatus.DONE,
-            progress         = 100,
-            english_words    = english_words,
-            vietnamese_words = vietnamese_words,
-            english_text     = result.get("english_text", ""),
-            vietnamese_text  = result.get("vietnamese_text", ""),
-            en_srt_path      = en_srt_path,
-            vi_srt_path      = vi_srt_path,
+            status               = JobStatus.DONE,
+            progress             = 100,
+            english_words        = english_words,
+            vietnamese_words     = vietnamese_words,
+            english_text         = result.get("english_text", ""),
+            vietnamese_text      = result.get("vietnamese_text", ""),
+            en_srt_storage_path  = en_storage_path,
+            vi_srt_storage_path  = vi_storage_path,
+            completed_at         = "now()",
         )
 
     except Exception as exc:
         update_job(job_id, status=JobStatus.ERROR, error=str(exc))
 
     finally:
-        # Clean up temp audio
+        # Delete local video and audio after pipeline (SRTs kept for 7-day retention)
         if os.path.exists(audio_path):
             os.remove(audio_path)
-        _cleanup_job_queue(job_id)
+        if os.path.exists(video_path):
+            os.remove(video_path)
 
 
 def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str | None = None) -> None:
@@ -961,7 +904,7 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
         if not english_words and not vietnamese_words:
             raise RuntimeError("No speech detected in the video.")
 
-        update_job(job_id, status=JobStatus.GENERATING, progress=90)
+        update_job(job_id, status=JobStatus.GENERATING_SRT, progress=90)
 
         en_srt_content = words_to_srt_string(english_words)
         vi_srt_content = words_to_srt_string(vietnamese_words)
@@ -969,6 +912,14 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
         vi_srt_path = str(OUTPUT_DIR / f"{job_id}_vi.srt")
         save_srt(en_srt_content, en_srt_path)
         save_srt(vi_srt_content, vi_srt_path)
+
+        # Atomicity: status='done' is only written after both uploads succeed.
+        user_id = job.get("user_id", "unknown")
+        en_storage_path = f"{user_id}/{job_id}/en.srt"
+        vi_storage_path = f"{user_id}/{job_id}/vi.srt"
+
+        upload_file(en_srt_path, en_storage_path)
+        upload_file(vi_srt_path, vi_storage_path)
 
         update_job(
             job_id,
@@ -978,8 +929,9 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
             vietnamese_words=vietnamese_words,
             english_text="\n".join(english_text_parts),
             vietnamese_text="\n".join(vietnamese_text_parts),
-            en_srt_path=en_srt_path,
-            vi_srt_path=vi_srt_path,
+            en_srt_storage_path=en_storage_path,
+            vi_srt_storage_path=vi_storage_path,
+            completed_at="now()",
         )
         emit_job_event(job_id, {"type": "done", "progress": 100})
 
@@ -988,4 +940,6 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
         emit_job_event(job_id, {"type": "error", "message": str(exc)})
 
     finally:
-        _cleanup_job_queue(job_id)
+        # Delete local video after pipeline (SRTs kept for 7-day retention)
+        if os.path.exists(video_path):
+            os.remove(video_path)
