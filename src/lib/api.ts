@@ -234,6 +234,14 @@ export async function getVideoUrl(videoFilename: string): Promise<string> {
   return `${BASE}${path}?token=${encodeURIComponent(token)}`;
 }
 
+/** POST /api/auth/sse-token — returns a 60s JWT for EventSource ?token= param. */
+async function getSseToken(): Promise<string> {
+  const res = await authFetch('/auth/sse-token', { method: 'POST' })
+  if (!res.ok) throw new Error(`SSE token fetch failed (${res.status})`)
+  const data = await res.json() as { token: string }
+  return data.token
+}
+
 export async function openRealtimeStream(
   jobId: string,
   handlers: {
@@ -241,34 +249,40 @@ export async function openRealtimeStream(
     onError?: (err: Event) => void;
   },
 ): Promise<EventSource> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token ?? "";
+  let token = ''
+  try {
+    token = await getSseToken()
+  } catch {
+    // Fall back to session token if SSE token endpoint unavailable
+    const { data: { session } } = await supabase.auth.getSession()
+    token = session?.access_token ?? ''
+  }
   const url = token
     ? `${BASE}/jobs/${jobId}/stream?token=${encodeURIComponent(token)}`
-    : `${BASE}/jobs/${jobId}/stream`;
-  const stream = new EventSource(url);
+    : `${BASE}/jobs/${jobId}/stream`
+  const stream = new EventSource(url)
 
   stream.onmessage = (event) => {
     try {
-      const payload = JSON.parse(event.data) as RealtimeStreamEvent;
-      handlers.onEvent(payload);
-      if (payload.type === "done" || payload.type === "error") {
-        stream.close();
+      const payload = JSON.parse(event.data) as RealtimeStreamEvent
+      handlers.onEvent(payload)
+      if (payload.type === 'done' || payload.type === 'error') {
+        stream.close()
       }
     } catch {
       handlers.onEvent({
-        type: "error",
-        message: "Invalid stream payload from server.",
-      });
-      stream.close();
+        type: 'error',
+        message: 'Invalid stream payload from server.',
+      })
+      stream.close()
     }
-  };
+  }
 
   stream.onerror = (err) => {
-    handlers.onError?.(err);
-  };
+    handlers.onError?.(err)
+  }
 
-  return stream;
+  return stream
 }
 
 /**
