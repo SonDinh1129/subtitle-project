@@ -5,11 +5,17 @@ Routes:
   GET /api/auth/me — return current user profile + computed is_premium
 """
 
+import jwt
+import time
+import os
+
 from flask import Blueprint, g, jsonify, request
 from middleware.auth import require_auth, get_profile, is_premium, _get_supabase_service
 from extensions import limiter
 
 auth_bp = Blueprint('auth', __name__)
+
+_SSE_TOKEN_TTL = 60
 
 
 @auth_bp.get('/me')
@@ -133,10 +139,6 @@ def delete_account():
         return jsonify({'error': 'Failed to delete account'}), 500
 
 
-import jwt as _jwt
-import time
-import os as _os
-
 @auth_bp.post('/sse-token')
 @require_auth
 @limiter.limit("30/minute")
@@ -146,7 +148,7 @@ def get_sse_token():
     Issues a short-lived (60s) JWT for use as ?token= on EventSource SSE connections.
     The SSE stream endpoint validates this via _verify_user_id_with_local_jwt.
     """
-    jwt_secret = _os.getenv('SUPABASE_JWT_SECRET')
+    jwt_secret = os.getenv('SUPABASE_JWT_SECRET')
     if not jwt_secret:
         return jsonify({'error': 'SSE tokens not available (SUPABASE_JWT_SECRET not set)'}), 503
 
@@ -155,7 +157,7 @@ def get_sse_token():
         'sub': g.user_id,
         'aud': 'authenticated',
         'iat': now,
-        'exp': now + 60,
+        'exp': now + _SSE_TOKEN_TTL,
     }
-    token = _jwt.encode(payload, jwt_secret, algorithm='HS256')
-    return jsonify({'token': token, 'expires_in': 60}), 200
+    token = jwt.encode(payload, jwt_secret, algorithm='HS256')
+    return jsonify({'token': token, 'expires_in': _SSE_TOKEN_TTL}), 200
