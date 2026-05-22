@@ -215,7 +215,7 @@ def stream_job_realtime(job_id: str):
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
-    if job.get("user_id") and job["user_id"] != g.user_id:
+    if job.get("user_id") != g.user_id:
         return jsonify({"error": "Forbidden"}), 403
 
     def _event(data: dict) -> str:
@@ -290,7 +290,7 @@ def get_job_status(job_id: str):
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
-    if job.get("user_id") and job["user_id"] != g.user_id:
+    if job.get("user_id") != g.user_id:
         return jsonify({"error": "Forbidden"}), 403
 
     # Chỉ trả về những field an toàn (không expose đường dẫn nội bộ)
@@ -333,7 +333,7 @@ def get_srt_url(job_id: str):
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
-    if job["user_id"] != g.user_id:
+    if job.get("user_id") != g.user_id:
         return jsonify({"error": "Forbidden"}), 403
 
     path_key = "en_srt_storage_path" if lang == "en" else "vi_srt_storage_path"
@@ -341,13 +341,21 @@ def get_srt_url(job_id: str):
     if not storage_path:
         return jsonify({"error": "SRT not available yet"}), 404
 
-    url = signed_url(storage_path)
+    try:
+        url = signed_url(storage_path)
+    except Exception as exc:
+        return jsonify({"error": f"Failed to generate download URL: {exc}"}), 503
     return jsonify({"url": url, "expires_in": 3600}), 200
 
 
 @subtitle_bp.route('/video/<filename>')
 @require_auth
 def serve_video(filename):
+    # filename format: {job_id}_{original_name} — extract job_id prefix
+    job_id_candidate = filename.split("_", 1)[0]
+    job = get_job(job_id_candidate)
+    if job and job.get("user_id") != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
     return send_from_directory(str(UPLOAD_DIR), filename)
 
 
@@ -370,7 +378,7 @@ def export_video():
     job = get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
-    if job.get("user_id") and job["user_id"] != g.user_id:
+    if job.get("user_id") != g.user_id:
         return jsonify({"error": "Forbidden"}), 403
     if job.get("status") != JobStatus.DONE:
         return jsonify({"error": f"Job not ready (status: {job.get('status')})"}), 409
@@ -391,9 +399,18 @@ def export_video():
 
 
 @subtitle_bp.get("/exports/<path:filename>")
+@require_auth
 def download_exported_video(filename: str):
     """Download an exported burned-subtitle video."""
     safe_name = Path(filename).name
+    # safe_name format: {job_id}_{lang}_{resolution}.mp4 — extract job_id prefix
+    parts = safe_name.split("_", 1)
+    if parts:
+        job_id_candidate = parts[0]
+        job = get_job(job_id_candidate)
+        if job and job.get("user_id") != g.user_id:
+            return jsonify({"error": "Forbidden"}), 403
+
     full_path = OUTPUT_DIR / safe_name
     if not full_path.exists():
         return jsonify({"error": "Exported file not found"}), 404
@@ -417,7 +434,7 @@ def optimize_job_subtitles(job_id):
     job = get_job(job_id)
     if not job:
         return jsonify(error="Job not found"), 404
-    if job.get("user_id") and job["user_id"] != g.user_id:
+    if job.get("user_id") != g.user_id:
         return jsonify(error="Forbidden"), 403
 
     vi_srt_path = str(OUTPUT_DIR / f"{job_id}_vi.srt")
@@ -444,7 +461,6 @@ def optimize_job_subtitles(job_id):
 
     return jsonify(
         message="Optimized successfully",
-        path=opt_path,
         stats=get_optimization_stats(blocks, optimized),
     )
 
@@ -469,7 +485,7 @@ def quality_report(job_id: str):
     job = get_job(job_id)
     if not job:
         return jsonify(error="Job not found"), 404
-    if job.get("user_id") and job["user_id"] != g.user_id:
+    if job.get("user_id") != g.user_id:
         return jsonify(error="Forbidden"), 403
 
     lang = request.args.get("lang", "vi")
