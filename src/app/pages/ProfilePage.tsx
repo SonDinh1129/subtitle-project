@@ -28,6 +28,7 @@ export function ProfilePage() {
 
   // Card 3 — Delete account
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('')
+  const [deletePassword, setDeletePassword] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteFeedback, setDeleteFeedback] = useState<FeedbackState>(null)
 
@@ -105,6 +106,14 @@ export function ProfilePage() {
     setDeleteFeedback(null)
     setDeleteLoading(true)
     try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user?.email ?? '',
+        password: deletePassword,
+      })
+      if (signInError) {
+        setDeleteFeedback({ type: 'error', message: isVi ? 'Mật khẩu không đúng' : 'Incorrect password' })
+        return
+      }
       const res = await deleteAccount()
       if (res.ok) {
         await signOut()
@@ -259,11 +268,23 @@ export function ProfilePage() {
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
               />
             </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {isVi ? 'Mật khẩu của bạn' : 'Your Password'}
+              </label>
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={e => setDeletePassword(e.target.value)}
+                placeholder={isVi ? 'Nhập mật khẩu để xác nhận' : 'Enter password to confirm'}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
             {deleteFeedback && <Feedback state={deleteFeedback} />}
             <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={deleteLoading || deleteConfirmEmail !== user?.email}
+                disabled={deleteLoading || deleteConfirmEmail !== user?.email || !deletePassword}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
               >
                 {deleteLoading && <Loader2 className="w-4 h-4 animate-spin" />}
