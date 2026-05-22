@@ -9,15 +9,27 @@ Service-role key bypasses RLS — do not expose to clients.
 """
 
 import os
+import threading
+from typing import Optional
+
 from supabase import create_client, Client
 
 BUCKET = "subtitle-files"
 
+# ── Singleton Supabase client ─────────────────────────────────────
+_supabase_client: Optional[Client] = None
+_supabase_client_lock = threading.Lock()
+
 
 def _client() -> Client:
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    return create_client(url, key)
+    global _supabase_client
+    if _supabase_client is None:
+        with _supabase_client_lock:
+            if _supabase_client is None:
+                url = os.environ["SUPABASE_URL"]
+                key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+                _supabase_client = create_client(url, key)
+    return _supabase_client
 
 
 def upload_file(local_path: str, storage_path: str) -> None:
@@ -44,7 +56,11 @@ def signed_url(storage_path: str, expires_in: int = 3600) -> str:
         path=storage_path,
         expires_in=expires_in,
     )
-    return result["signedURL"]
+    # Supabase Python client may return "signedURL" or "signedUrl" depending on version
+    url = result.get("signedURL") or result.get("signedUrl") or result.get("signed_url")
+    if not url:
+        raise RuntimeError(f"Supabase did not return a signed URL. Response keys: {list(result.keys())}")
+    return url
 
 
 def delete_object(storage_path: str) -> None:
