@@ -38,6 +38,22 @@ _jobs_lock = threading.Lock()
 _job_event_queues: dict[str, queue.Queue] = {}
 _job_event_lock = threading.Lock()
 
+import time as _time
+
+_job_timestamps: dict[str, float] = {}  # job_id → monotonic timestamp at cache insertion
+_JOB_CACHE_TTL = 7200  # 2 hours in seconds
+
+
+def _evict_stale_jobs() -> None:
+    """Remove jobs older than _JOB_CACHE_TTL from the in-memory cache.
+    Must be called with _jobs_lock held.
+    """
+    cutoff = _time.monotonic() - _JOB_CACHE_TTL
+    stale = [jid for jid, ts in _job_timestamps.items() if ts < cutoff]
+    for jid in stale:
+        _jobs.pop(jid, None)
+        _job_timestamps.pop(jid, None)
+
 
 def create_job(
     filename: str,
@@ -71,6 +87,7 @@ def create_job(
     _client().table("jobs").insert(row).execute()
     with _jobs_lock:
         _jobs[job_id] = dict(row)
+        _job_timestamps[job_id] = _time.monotonic()
     with _job_event_lock:
         _job_event_queues[job_id] = queue.Queue()
     return dict(row)
@@ -88,6 +105,8 @@ def get_job(job_id: str) -> Optional[dict]:
             # Only populate cache if not already set by a concurrent update_job call
             if job_id not in _jobs:
                 _jobs[job_id] = dict(row)
+                _job_timestamps[job_id] = _time.monotonic()
+                _evict_stale_jobs()
             return dict(_jobs[job_id])
     return None
 
