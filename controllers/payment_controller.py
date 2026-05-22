@@ -28,7 +28,10 @@ def create_order():
     Creates a MoMo payment order for premium upgrade (99,000 VND a year).
     Returns { payment_url } to redirect user to MoMo checkout.
     """
-    profile = get_profile(g.user_id)
+    try:
+        profile = get_profile(g.user_id)
+    except RuntimeError:
+        return jsonify({"error": "Service temporarily unavailable"}), 503
     if not profile:
         return jsonify({"error": "Profile not found"}), 404
 

@@ -21,7 +21,10 @@ def get_me():
     Returns the current user's profile with backend-computed is_premium.
     Frontend should NOT recompute is_premium from premium_until.
     """
-    profile = get_profile(g.user_id)
+    try:
+        profile = get_profile(g.user_id)
+    except RuntimeError:
+        return jsonify({'error': 'Service temporarily unavailable'}), 503
     if not profile:
         return jsonify({'error': 'Profile not found'}), 404
 

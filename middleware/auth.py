@@ -33,16 +33,26 @@ def _get_supabase_service() -> Client:
 # ─── Profile helpers ──────────────────────────────────────────────────────────
 
 def get_profile(user_id: str) -> dict | None:
-    """Fetch user profile from Supabase. Cached in g._profile for the request lifetime."""
+    """Fetch user profile from Supabase. Cached in g._profile for the request lifetime.
+
+    Returns None when the profile row does not exist.
+    Raises RuntimeError on transient connectivity errors so callers can return 503.
+    """
     if hasattr(g, '_profile') and g._profile is not None:
         return g._profile
     try:
         supabase = _get_supabase_service()
         result = supabase.table('profiles').select('*').eq('id', user_id).single().execute()
-        g._profile = result.data
+        g._profile = result.data  # None when row not found
         return g._profile
-    except Exception:
-        return None
+    except Exception as exc:
+        msg = str(exc).lower()
+        # "json object requested, multiple (or no) rows returned" is Supabase's
+        # way of saying the row does not exist — treat it as None, not an error.
+        if "no rows" in msg or "multiple" in msg or "pgrst116" in msg:
+            g._profile = None
+            return None
+        raise RuntimeError(f"Profile lookup failed (transient): {exc}") from exc
 
 
 def is_premium(profile: dict | None) -> bool:
@@ -116,15 +126,17 @@ def _verify_user_id_with_local_jwt(token: str) -> str | None:
     jwt_secret = os.getenv('SUPABASE_JWT_SECRET')
     if not jwt_secret:
         return None
-
-    payload = jwt.decode(
-        token,
-        jwt_secret,
-        algorithms=['HS256'],
-        audience='authenticated',
-    )
-    user_id = payload.get('sub')
-    return str(user_id) if user_id else None
+    try:
+        payload = jwt.decode(
+            token,
+            jwt_secret,
+            algorithms=['HS256'],
+            audience='authenticated',
+        )
+        user_id = payload.get('sub')
+        return str(user_id) if user_id else None
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
 
 
 def require_auth(f):

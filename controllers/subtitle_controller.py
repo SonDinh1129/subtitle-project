@@ -116,7 +116,10 @@ def upload_video():  # noqa: C901
         { job_id, status }
     """
     # ── Free tier checks ───────────────────────────────────────────
-    profile = get_profile(g.user_id)
+    try:
+        profile = get_profile(g.user_id)
+    except RuntimeError:
+        return jsonify({"error": "Service temporarily unavailable"}), 503
     if not profile:
         return jsonify({"error": "Profile not found"}), 404
 
