@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { uploadVideo, pollUntilDone, STATUS_MESSAGES, type ProcessMode } from "../../lib/api";
@@ -56,6 +56,13 @@ export function UploadPage() {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    return () => {
+      if (previewUrl && previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
   const [language, setLanguage] = useState("en");
   const [langOpen, setLangOpen] = useState(false);
   const [processingMsg, setProcessingMsg] = useState(isVi ? "Đang phân tích âm thanh..." : "Analyzing audio...");
@@ -79,6 +86,10 @@ export function UploadPage() {
 
     setSelectedFile(file);
     if (isLikelyVideoFile(file)) {
+      setPreviewUrl((prev) => {
+        if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return null;
+      });
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
       sessionStorage.setItem("videoPreviewUrl", url);
@@ -208,6 +219,9 @@ export function UploadPage() {
   };
 
   const handleReset = () => {
+    if (previewUrl && previewUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(previewUrl);
+    }
     setState("idle");
     setSelectedFile(null);
     setPreviewUrl(null);
