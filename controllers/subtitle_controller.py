@@ -169,8 +169,7 @@ def upload_video():  # noqa: C901
                 "check_and_increment_video_count",
                 {"uid": g.user_id, "lim": 5},
             ).execute()
-            new_count = result.data  # None means limit was reached
-            if new_count is None:
+            if not result.data:
                 return jsonify({"error": "Monthly video limit reached (5/month)", "code": "LIMIT_REACHED"}), 403
         except Exception:
             current_app.logger.exception("check_and_increment_video_count failed for user %s", g.user_id)
