@@ -293,6 +293,12 @@ export function EditorPage() {
   const [noJobData, setNoJobData] = useState(false);
   const [subtitleAnchor, setSubtitleAnchor] = useState({ x: 50, y: 60 });
   const [isDraggingSubtitle, setIsDraggingSubtitle] = useState(false);
+  const fakePlayheadRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (fakePlayheadRef.current) clearInterval(fakePlayheadRef.current);
+    };
+  }, []);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const videoFrameRef = useRef<HTMLDivElement>(null);
   const subtitleDragOffsetRef = useRef({ x: 0, y: 0 });
@@ -625,10 +631,12 @@ export function EditorPage() {
     } else {
       if (!isPlaying) {
         let t = currentTime;
-        const interval = setInterval(() => {
+        if (fakePlayheadRef.current) clearInterval(fakePlayheadRef.current);
+        fakePlayheadRef.current = setInterval(() => {
           t += 0.1;
           if (t >= totalDuration) {
-            clearInterval(interval);
+            clearInterval(fakePlayheadRef.current!);
+            fakePlayheadRef.current = null;
             setIsPlaying(false);
             setCurrentTime(0);
           } else {
@@ -756,8 +764,9 @@ export function EditorPage() {
     }
   }, [subtitleDisplayMode, textEn, textVi, textEnLive, textViLive]);
 
-  const filteredSubtitles = subtitles.filter((s) =>
-    s.text.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredSubtitles = useMemo(
+    () => subtitles.filter((s) => s.text.toLowerCase().includes(searchTerm.toLowerCase())),
+    [subtitles, searchTerm],
   );
 
   const updateSubtitleText = (id: string, text: string) => {
