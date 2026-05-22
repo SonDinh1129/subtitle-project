@@ -57,7 +57,18 @@ def create_app() -> Flask:
     )
 
     # ── Proxy fix (correct IP behind reverse proxy) ───────────────
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)  # type: ignore[assignment]
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+
+    # ── Secret key guard ──────────────────────────────────────────
+    secret_key = os.getenv("SECRET_KEY", "")
+    is_debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    if not secret_key and not is_debug:
+        raise RuntimeError(
+            "SECRET_KEY environment variable is not set. "
+            "Set it to a long random string in production."
+        )
+    if not secret_key:
+        secret_key = "dev-secret-change-in-prod"
 
     # ── Config ────────────────────────────────────────────────────
     colab_url = _resolve_colab_url()
@@ -65,8 +76,8 @@ def create_app() -> Flask:
     app.config.update(
         COLAB_URL                  = colab_url,
         COLAB_REALTIME_URL         = colab_realtime_url or colab_url,
-        MAX_CONTENT_LENGTH         = 2 * 1024 * 1024 * 1024,   # 2 GB upload limit
-        SECRET_KEY                 = os.getenv("SECRET_KEY", "dev-secret-change-in-prod"),
+        MAX_CONTENT_LENGTH         = 2 * 1024 * 1024 * 1024,
+        SECRET_KEY                 = secret_key,
         SUPABASE_URL               = os.getenv("SUPABASE_URL", ""),
         SUPABASE_SERVICE_ROLE_KEY  = os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
         SUPABASE_JWT_SECRET        = os.getenv("SUPABASE_JWT_SECRET", ""),
@@ -92,6 +103,14 @@ def create_app() -> Flask:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "media-src 'self' blob:; "
+            "connect-src 'self' https://*.supabase.co wss://*.supabase.co;"
+        )
         return response
 
     # ── Serve React frontend (production build) ───────────────────
@@ -101,8 +120,14 @@ def create_app() -> Flask:
         static_dir = os.path.join(app.root_path, "views", "static")
         if path and os.path.exists(os.path.join(static_dir, path)):
             return send_from_directory(static_dir, path)
-        # SPA fallback → index.html
         return send_from_directory(static_dir, "index.html")
+
+    # ── Load VAD model and start cleanup daemon ───────────────────
+    # Must run inside create_app() so gunicorn workers also initialise these.
+    load_vad()
+    from models.cleanup import start_cleanup_daemon
+    from models.subtitle_model import UPLOAD_DIR, OUTPUT_DIR
+    start_cleanup_daemon([UPLOAD_DIR, OUTPUT_DIR], retention_days=7)
 
     return app
 
@@ -112,21 +137,11 @@ def create_app() -> Flask:
 # ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Load VAD model before accepting requests
-    load_vad()
-
-    from models.cleanup import start_cleanup_daemon
-    from models.subtitle_model import UPLOAD_DIR, OUTPUT_DIR
-    start_cleanup_daemon([UPLOAD_DIR, OUTPUT_DIR], retention_days=7)
-
     application = create_app()
-
     port  = int(os.getenv("PORT", 5000))
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
-
     print(f"\n🚀 SubAI backend running at http://localhost:5000")
     print(f"   COLAB_URL          = {application.config['COLAB_URL']}")
     print(f"   COLAB_REALTIME_URL = {application.config['COLAB_REALTIME_URL']}")
     print(f"   Debug              = {debug}\n")
-
     application.run(host="0.0.0.0", port=port, debug=debug)
