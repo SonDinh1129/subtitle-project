@@ -6,10 +6,12 @@ Routes:
   POST /api/payment/ipn           — receive MoMo IPN (server-to-server)
 """
 
+import logging
 import os
 from datetime import datetime, timezone
 
 import requests
+from dateutil.relativedelta import relativedelta
 from flask import Blueprint, g, request, jsonify
 
 from middleware.auth import require_auth, get_profile, is_premium, _get_supabase_service
@@ -17,6 +19,7 @@ from extensions import limiter
 from models.momo import create_momo_payment, verify_momo_ipn
 
 payment_bp = Blueprint("payment", __name__)
+logger = logging.getLogger(__name__)
 
 
 @payment_bp.post("/create-order")
@@ -63,14 +66,18 @@ def create_order():
 
     payment_url = momo_resp.get("payUrl", "")
 
-    supabase = _get_supabase_service()
-    supabase.table("payments").insert({
-        "user_id":        g.user_id,
-        "momo_order_id":  order_id,
-        "amount":         amount,
-        "currency":       "VND",
-        "status":         "pending",
-    }).execute()
+    try:
+        supabase = _get_supabase_service()
+        supabase.table("payments").insert({
+            "user_id":        g.user_id,
+            "momo_order_id":  order_id,
+            "amount":         amount,
+            "currency":       "VND",
+            "status":         "pending",
+        }).execute()
+    except Exception as exc:
+        logger.error("Failed to insert payment record for user %s: %s", g.user_id, exc)
+        return jsonify({"error": "Failed to record order"}), 503
 
     return jsonify({"payment_url": payment_url, "order_id": order_id}), 200
 
@@ -80,16 +87,19 @@ def payment_ipn():
     """
     POST /api/payment/ipn
     Receives MoMo IPN callback (server-to-server, no user auth).
+    Always returns 200 (MoMo retries on non-200 responses).
     Idempotent: safe to call multiple times with the same order.
     """
     data = request.get_json(silent=True) or {}
 
-    import logging
-    logging.warning(f"[IPN] received: {data}")
+    # Log without the signature field to prevent replay attacks via log access
+    safe_log = {k: v for k, v in data.items() if k != "signature"}
+    logger.info("[IPN] received: %s", safe_log)
 
     if not verify_momo_ipn(data):
-        logging.warning(f"[IPN] signature FAILED for orderId={data.get('orderId')} sig={data.get('signature')}")
-        return jsonify({"error": "Invalid signature"}), 400
+        logger.warning("[IPN] signature FAILED for orderId=%s", data.get("orderId"))
+        # Still return 200 — MoMo must not retry on signature failure
+        return jsonify({"ok": False, "error": "Invalid signature"}), 200
 
     order_id    = data.get("orderId", "")
     result_code = data.get("resultCode", -1)
@@ -108,26 +118,33 @@ def payment_ipn():
             .execute()
         )
         payment = result.data
-    except Exception:
-        return jsonify({"error": "Payment record not found"}), 404
+    except Exception as exc:
+        logger.error("[IPN] DB lookup failed for orderId=%s: %s", order_id, exc)
+        return jsonify({"ok": False, "error": "DB error"}), 200
 
     if not payment:
-        return jsonify({"error": "Payment record not found"}), 404
+        logger.warning("[IPN] no payment record for orderId=%s", order_id)
+        return jsonify({"ok": False, "error": "Payment record not found"}), 200
 
     if payment.get("status") == "paid":
         return jsonify({"ok": True}), 200
 
     user_id = payment["user_id"]
     now           = datetime.now(timezone.utc)
-    premium_until = now.replace(year=now.year + 1)
+    # Use relativedelta to handle leap-year boundaries (e.g. Feb 29 + 1 year)
+    premium_until = now + relativedelta(years=1)
 
-    supabase.table("payments").update({
-        "status":  "paid",
-        "paid_at": now.isoformat(),
-    }).eq("momo_order_id", order_id).execute()
+    try:
+        supabase.table("payments").update({
+            "status":  "paid",
+            "paid_at": now.isoformat(),
+        }).eq("momo_order_id", order_id).execute()
 
-    supabase.table("profiles").update({
-        "premium_until": premium_until.isoformat(),
-    }).eq("id", user_id).execute()
+        supabase.table("profiles").update({
+            "premium_until": premium_until.isoformat(),
+        }).eq("id", user_id).execute()
+    except Exception as exc:
+        logger.error("[IPN] Failed to update payment/profile for orderId=%s: %s", order_id, exc)
+        return jsonify({"ok": False, "error": "DB update failed"}), 200
 
     return jsonify({"ok": True}), 200
