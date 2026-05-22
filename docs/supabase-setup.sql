@@ -75,3 +75,21 @@ BEGIN
   WHERE id = uid;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 8. Atomically check the free-tier video limit and increment if allowed.
+-- Returns the new videos_used_this_month value if the increment succeeded,
+-- or NULL if the user has already reached the limit.
+-- Must be run in Supabase SQL Editor to deploy.
+CREATE OR REPLACE FUNCTION check_and_increment_video_count(uid uuid, lim int DEFAULT 5)
+RETURNS int AS $$
+DECLARE
+  new_count int;
+BEGIN
+  UPDATE profiles
+  SET videos_used_this_month = videos_used_this_month + 1
+  WHERE id = uid
+    AND videos_used_this_month < lim
+  RETURNING videos_used_this_month INTO new_count;
+  RETURN new_count;  -- NULL if no row was updated (limit reached)
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

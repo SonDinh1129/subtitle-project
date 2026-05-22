@@ -162,10 +162,19 @@ def upload_video():  # noqa: C901
     if process_mode == "realtime" and not premium:
         return jsonify({"error": "Realtime mode requires premium", "code": "PREMIUM_REQUIRED"}), 403
 
-    # Gate: free tier video limit (5/month)
-    videos_used = profile.get("videos_used_this_month", 0)
-    if not premium and videos_used >= 5:
-        return jsonify({"error": "Monthly video limit reached (5/month)", "code": "LIMIT_REACHED"}), 403
+    # Gate: free tier video limit — atomic check+increment in Postgres
+    if not premium:
+        try:
+            result = _get_supabase_service().rpc(
+                "check_and_increment_video_count",
+                {"uid": g.user_id, "lim": 5},
+            ).execute()
+            new_count = result.data  # None means limit was reached
+            if new_count is None:
+                return jsonify({"error": "Monthly video limit reached (5/month)", "code": "LIMIT_REACHED"}), 403
+        except Exception:
+            current_app.logger.exception("check_and_increment_video_count failed for user %s", g.user_id)
+            return jsonify({"error": "Service temporarily unavailable"}), 503
 
     safe_name  = secure_filename(file.filename)[:200]
     job        = create_job(
@@ -180,12 +189,6 @@ def upload_video():  # noqa: C901
     file.save(video_path)
     # video_path is ephemeral (local pipeline only); store in memory cache, not Postgres
     set_video_path(job_id, video_path)
-
-    # Increment usage counter atomically
-    try:
-        _get_supabase_service().rpc("increment_video_count", {"uid": g.user_id}).execute()
-    except Exception:
-        pass  # Non-fatal
 
     # ── Start pipeline in background thread ───────────────────────
     colab_url = current_app.config["COLAB_URL"]
