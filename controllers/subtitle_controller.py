@@ -392,7 +392,7 @@ def export_video():
 
     export_id = str(_uuid.uuid4())
     with _exports_lock:
-        _exports[export_id] = {"status": "pending"}
+        _exports[export_id] = {"status": "pending", "user_id": g.user_id}
 
     def _run(app, eid, j, res, lng):
         with app.app_context():
@@ -422,6 +422,8 @@ def get_export_status(export_id: str):
         entry = _exports.get(export_id)
     if not entry:
         return jsonify({"error": "Export not found"}), 404
+    if entry.get("user_id") != g.user_id:
+        return jsonify({"error": "Forbidden"}), 403
     if entry["status"] == "done":
         return jsonify({
             "export_id": export_id,
