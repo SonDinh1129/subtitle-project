@@ -111,6 +111,7 @@ export function ProfilePage() {
         password: deletePassword,
       })
       if (signInError) {
+        setDeletePassword('')
         setDeleteFeedback({ type: 'error', message: isVi ? 'Mật khẩu không đúng' : 'Incorrect password' })
         return
       }
