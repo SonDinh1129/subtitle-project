@@ -10,6 +10,7 @@ Service-role key bypasses RLS — do not expose to clients.
 """
 
 import os
+import time as _time
 import uuid
 import queue
 import threading
@@ -37,8 +38,6 @@ _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 _job_event_queues: dict[str, queue.Queue] = {}
 _job_event_lock = threading.Lock()
-
-import time as _time
 
 _job_timestamps: dict[str, float] = {}  # job_id → monotonic timestamp at cache insertion
 _JOB_CACHE_TTL = 7200  # 2 hours in seconds
@@ -125,6 +124,8 @@ def update_job(job_id: str, **fields) -> dict:
         cached = _jobs.get(job_id, {})
         cached.update(fields)
         _jobs[job_id] = cached
+        if job_id not in _job_timestamps:
+            _job_timestamps[job_id] = _time.monotonic()
         return dict(cached)
 
 
