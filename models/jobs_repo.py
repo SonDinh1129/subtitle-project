@@ -17,11 +17,20 @@ from typing import Optional
 
 from supabase import create_client, Client
 
+# ── Singleton Supabase client ─────────────────────────────────────
+_supabase_client: Optional[Client] = None
+_supabase_client_lock = threading.Lock()
+
 
 def _client() -> Client:
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    return create_client(url, key)
+    global _supabase_client
+    if _supabase_client is None:
+        with _supabase_client_lock:
+            if _supabase_client is None:
+                url = os.environ["SUPABASE_URL"]
+                key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+                _supabase_client = create_client(url, key)
+    return _supabase_client
 
 
 _jobs: dict[str, dict] = {}
@@ -76,23 +85,28 @@ def get_job(job_id: str) -> Optional[dict]:
     if result.data:
         row = result.data[0]
         with _jobs_lock:
-            _jobs[job_id] = dict(row)
-        return dict(row)
+            # Only populate cache if not already set by a concurrent update_job call
+            if job_id not in _jobs:
+                _jobs[job_id] = dict(row)
+            return dict(_jobs[job_id])
     return None
 
 
 def update_job(job_id: str, **fields) -> dict:
-    """Update job fields in Postgres and refresh the memory cache.
+    """Update job fields in Postgres and refresh the memory cache atomically.
 
-    Returns the updated job dict (merged from cache + fields).
+    Holds the lock across the read-modify-write of the in-memory cache to
+    prevent lost updates under concurrent calls.
+    Returns the updated job dict.
     """
-    with _jobs_lock:
-        cached = dict(_jobs.get(job_id, {}))
-    cached.update(fields)
+    # Write to Postgres first (outside lock to avoid holding lock during I/O)
     _client().table("jobs").update(fields).eq("job_id", job_id).execute()
+    # Atomically merge fields into cache
     with _jobs_lock:
-        _jobs[job_id] = dict(cached)
-    return dict(cached)
+        cached = _jobs.get(job_id, {})
+        cached.update(fields)
+        _jobs[job_id] = cached
+        return dict(cached)
 
 
 def get_job_event_queue(job_id: str) -> queue.Queue:
