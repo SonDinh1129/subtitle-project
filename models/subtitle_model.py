@@ -750,12 +750,16 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
     if not job:
         return
 
-    video_path       = job["video_path"]
     translation_mode = job["translation_mode"]
     source_lang      = job.get("source_lang", "en")
     audio_path       = str(UPLOAD_DIR / f"{job_id}_audio.wav")
+    video_path       = None  # populated inside try block
 
     try:
+        video_path = job.get("video_path")
+        if not video_path:
+            raise RuntimeError("video_path not found in job cache — server may have restarted")
+
         # ── Step 1: Extract audio ──────────────────────────────────
         update_job(job_id, status=JobStatus.EXTRACTING, progress=5)
         extract_audio(video_path, audio_path)
@@ -812,9 +816,9 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
 
     finally:
         # Delete local video and audio after pipeline (SRTs kept for 7-day retention)
-        if os.path.exists(audio_path):
+        if audio_path and os.path.exists(audio_path):
             os.remove(audio_path)
-        if os.path.exists(video_path):
+        if video_path and os.path.exists(video_path):
             os.remove(video_path)
 
 
@@ -830,10 +834,14 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
     if not job:
         return
 
-    video_path = job["video_path"]
     source_lang = job.get("source_lang", "en")
+    video_path = None  # populated inside try block
 
     try:
+        video_path = job.get("video_path")
+        if not video_path:
+            raise RuntimeError("video_path not found in job cache — server may have restarted")
+
         update_job(job_id, status=JobStatus.TRANSCRIBING, progress=10)
         if source_lang == "en":
             audio_producer = AudioStreamProducer(video_path, sample_rate=24000, frame_duration=0.08)
@@ -941,5 +949,5 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
 
     finally:
         # Delete local video after pipeline (SRTs kept for 7-day retention)
-        if os.path.exists(video_path):
+        if video_path and os.path.exists(video_path):
             os.remove(video_path)
