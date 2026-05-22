@@ -12,7 +12,12 @@ import os
 import threading
 import json
 import queue
+import uuid as _uuid
 from pathlib import Path
+
+# In-memory export registry: export_id → {"status": "pending"|"done"|"error", "filename"?: str, "error"?: str}
+_exports: dict[str, dict] = {}
+_exports_lock = threading.Lock()
 
 from flask import (
     Blueprint, request, jsonify,
@@ -364,7 +369,7 @@ def serve_video(filename):
 @subtitle_bp.post("/export")
 @require_auth
 def export_video():
-    """Export a burned-subtitle video in selected resolution."""
+    """Start async export. Returns 202 with export_id; poll GET /export-status/<export_id>."""
     payload = request.get_json(silent=True) or {}
     job_id = payload.get("job_id", "")
     resolution = payload.get("resolution", "720p")
@@ -385,19 +390,48 @@ def export_video():
     if job.get("status") != JobStatus.DONE:
         return jsonify({"error": f"Job not ready (status: {job.get('status')})"}), 409
 
-    try:
-        output_path = export_burned_video(job, resolution=resolution, lang=lang)
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    export_id = str(_uuid.uuid4())
+    with _exports_lock:
+        _exports[export_id] = {"status": "pending"}
 
-    filename = Path(output_path).name
-    return jsonify({
-        "job_id": job_id,
-        "resolution": resolution,
-        "lang": lang,
-        "filename": filename,
-        "download_url": f"/api/exports/{filename}",
-    }), 200
+    def _run(app, eid, j, res, lng):
+        with app.app_context():
+            try:
+                output_path = export_burned_video(j, resolution=res, lang=lng)
+                filename = Path(output_path).name
+                with _exports_lock:
+                    _exports[eid] = {"status": "done", "filename": filename}
+            except Exception as exc:
+                with _exports_lock:
+                    _exports[eid] = {"status": "error", "error": str(exc)}
+
+    threading.Thread(
+        target=_run,
+        args=(current_app._get_current_object(), export_id, job, resolution, lang),
+        daemon=True,
+    ).start()
+
+    return jsonify({"export_id": export_id, "status": "pending"}), 202
+
+
+@subtitle_bp.get("/export-status/<export_id>")
+@require_auth
+def get_export_status(export_id: str):
+    """Poll async export status. Returns status + download_url when done."""
+    with _exports_lock:
+        entry = _exports.get(export_id)
+    if not entry:
+        return jsonify({"error": "Export not found"}), 404
+    if entry["status"] == "done":
+        return jsonify({
+            "export_id": export_id,
+            "status": "done",
+            "filename": entry["filename"],
+            "download_url": f"/api/exports/{entry['filename']}",
+        }), 200
+    if entry["status"] == "error":
+        return jsonify({"export_id": export_id, "status": "error", "error": entry["error"]}), 200
+    return jsonify({"export_id": export_id, "status": "pending"}), 200
 
 
 @subtitle_bp.get("/exports/<path:filename>")

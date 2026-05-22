@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   wordsToSubtitles,
   exportVideo as exportVideoApi,
+  pollExportUntilDone,
   openRealtimeStream,
   getVideoUrl,
   type Word,
@@ -661,10 +662,11 @@ export function EditorPage() {
     setShowExportMenu(false);
     setExportingResolution(resolution);
     try {
-      const data = await exportVideoApi(currentJobId, resolution, subtitleLang);
+      const started = await exportVideoApi(currentJobId, resolution, subtitleLang);
+      const data = await pollExportUntilDone(started.export_id);
       const a = document.createElement("a");
-      a.href = data.download_url;
-      a.download = data.filename;
+      a.href = data.download_url!;
+      a.download = data.filename!;
       document.body.appendChild(a);
       a.click();
       a.remove();

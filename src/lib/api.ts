@@ -161,11 +161,11 @@ export type ExportResolution = "360p" | "720p" | "1080p";
 export type SubtitleLang = "en" | "vi";
 
 export interface ExportResponse {
-  job_id: string;
-  resolution: ExportResolution;
-  lang: SubtitleLang;
-  filename: string;
-  download_url: string;
+  export_id: string;
+  status: "pending" | "done" | "error";
+  filename?: string;
+  download_url?: string;
+  error?: string;
 }
 
 // ─── Status messages (hiển thị trên UI) ─────────────────────────────────────
@@ -332,7 +332,8 @@ export async function getSrtUrl(jobId: string, lang: "en" | "vi"): Promise<strin
 
 /**
  * POST /api/export
- * Tạo video đã burn subtitle theo độ phân giải chọn.
+ * Starts async export. Returns 202 with export_id immediately.
+ * Poll getExportStatus until status === "done".
  */
 export async function exportVideo(
   jobId: string,
@@ -348,6 +349,34 @@ export async function exportVideo(
     throw new Error(`Export failed (${res.status}): ${text}`);
   }
   return res.json();
+}
+
+/** GET /api/export-status/:exportId — returns current export status. */
+export async function getExportStatus(exportId: string): Promise<ExportResponse> {
+  const res = await authFetch(`/export-status/${exportId}`);
+  if (!res.ok) throw new Error(`Export status check failed (${res.status})`);
+  return res.json();
+}
+
+/** Poll export status until done or error. Returns the final ExportResponse. */
+export function pollExportUntilDone(
+  exportId: string,
+  onUpdate?: (r: ExportResponse) => void,
+  intervalMs = 2000,
+): Promise<ExportResponse> {
+  return new Promise((resolve, reject) => {
+    const id = setInterval(async () => {
+      try {
+        const r = await getExportStatus(exportId)
+        onUpdate?.(r)
+        if (r.status === "done") { clearInterval(id); resolve(r) }
+        if (r.status === "error") { clearInterval(id); reject(new Error(r.error ?? "Export failed")) }
+      } catch (err) {
+        clearInterval(id)
+        reject(err)
+      }
+    }, intervalMs)
+  })
 }
 
 /** Trigger browser download of the SRT from Supabase Storage signed URL. */
