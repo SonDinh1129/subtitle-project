@@ -2,13 +2,13 @@
 
 ## UC-00: Tổng quan hệ thống
 
-**Mô tả:** SubAI là ứng dụng tạo phụ đề tự động cho video. Người dùng upload video (tiếng Anh hoặc tiếng Việt), hệ thống nhận dạng giọng nói (ASR) và dịch sang ngôn ngữ đích, tạo file phụ đề SRT với timestamp chính xác. Hệ thống hỗ trợ 2 chế độ xử lý: Normal (batch qua HTTP) và Realtime (stream frame-by-frame qua WebSocket — chỉ dành cho Premium). Sử dụng 2 Colab VM: VM2 (Faster-Whisper + VinAI, normal mode + VI realtime) và VM1 (Kyutai stt-1b-en_fr + VinAI, EN realtime). Người dùng có thể chỉnh sửa phụ đề trong editor tích hợp, tải file SRT, hoặc export video đã burn subtitle. Hệ thống phân biệt Free (5 video/tháng, không có realtime) và Premium (trả 99.000đ một lần, dùng mãi, unlimited + realtime).
+**Mô tả:** SubAI là ứng dụng tạo phụ đề tự động cho video. Người dùng upload video (tiếng Anh hoặc tiếng Việt), hệ thống nhận dạng giọng nói (ASR) và dịch sang ngôn ngữ đích, tạo file phụ đề SRT với timestamp chính xác. Hệ thống hỗ trợ 2 chế độ xử lý: Normal (batch qua HTTP) và Realtime (stream frame-by-frame qua WebSocket — chỉ dành cho Premium). Sử dụng 2 Colab VM: VM2 (Faster-Whisper + VinAI, normal mode + VI realtime) và VM1 (Kyutai stt-1b-en_fr + VinAI, EN realtime). Người dùng có thể chỉnh sửa phụ đề trong editor tích hợp, tải file SRT, hoặc export video đã burn subtitle (async). Hệ thống phân biệt Free (5 video/tháng, không có realtime) và Premium (trả 99.000đ qua MoMo, Premium 1 năm, unlimited + realtime).
 
 **Actors:**
 - **Guest** — chưa đăng nhập, chỉ xem landing page và đăng ký/đăng nhập
 - **Free User** — đã đăng nhập, giới hạn 5 video/tháng, không có realtime
-- **Premium User** — đã nâng cấp, unlimited video + realtime mode
-- **PayOS** — hệ thống thanh toán bên ngoài, gửi webhook xác nhận
+- **Premium User** — đã nâng cấp, unlimited video + realtime mode (Premium 1 năm)
+- **MoMo** — hệ thống thanh toán bên ngoài, gửi IPN xác nhận
 - **Colab VM2 (COLAB_URL)** — batch ASR+MT (Faster-Whisper + VinAI) + VI realtime (Silero VAD + PhoWhisper-large), endpoint `/transcribe_translate` và `/ws/transcribe_vi_realtime`
 - **Colab VM1 (COLAB_REALTIME_URL)** — EN realtime (Kyutai stt-1b-en_fr + VinAI EN→VI), endpoint `/ws/transcribe_kyutai`
 
@@ -21,7 +21,7 @@ Guest → Đăng ký/Đăng nhập → Free User
                                   │
                          Download SRT hoặc Export video
                                   │
-                         Nâng cấp Premium (PayOS 99.000đ)
+                         Nâng cấp Premium (MoMo 99.000đ)
                                   │
                             Premium User
                                   │
@@ -84,7 +84,7 @@ Guest → Đăng ký/Đăng nhập → Free User
 |---|----------|-------|
 | UC-26 | Tải file SRT tiếng Anh | Download subtitles_en.srt |
 | UC-27 | Tải file SRT tiếng Việt | Download subtitles_vi.srt |
-| UC-28 | Export video burned subtitle | Chọn ngôn ngữ + resolution (360p/720p/1080p) → tải video với subtitle đã burn |
+| UC-28 | Export video burned subtitle | Chọn ngôn ngữ + resolution (360p/720p/1080p) → POST /export → 202 + polling → tải video với subtitle đã burn |
 
 ### Account
 
@@ -109,11 +109,11 @@ Guest → Đăng ký/Đăng nhập → Free User
 
 ---
 
-## Actor: PayOS (hệ thống bên ngoài)
+## Actor: MoMo (hệ thống bên ngoài)
 
 | # | Use Case | Mô tả |
 |---|----------|-------|
-| UC-36 | Gửi webhook thanh toán | Sau user thanh toán → gọi POST /api/payment/webhook → Flask verify signature → activate premium |
+| UC-36 | Gửi IPN thanh toán | Sau user thanh toán → gọi POST /api/payment/ipn → Flask verify MoMo signature → activate premium 1 năm; luôn trả 200 |
 
 ---
 

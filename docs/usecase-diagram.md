@@ -5,7 +5,7 @@ Render tại [plantuml.com/plantuml](https://www.plantuml.com/plantuml/uml) ho�
 Chia thành 3 diagram theo nhóm chức năng:
 - **Diagram 1** — Xác thực (Guest)
 - **Diagram 2** — Upload & Xử lý (Free User, Premium User, Colab VMs)
-- **Diagram 3** — Tài khoản & Thanh toán (Free User, Premium User, PayOS)
+- **Diagram 3** — Tài khoản & Thanh toán (Free User, Premium User, MoMo)
 
 ---
 
@@ -162,7 +162,7 @@ left to right direction
 
 actor "Free User"    as Free
 actor "Premium User" as Premium
-actor "PayOS"        as PayOS
+actor "MoMo"         as MoMo
 
 Premium --|> Free
 
@@ -175,7 +175,7 @@ rectangle "SubAI" {
   }
 
   package "Thanh toán" {
-    usecase "Webhook xác nhận" as UC36
+    usecase "IPN xác nhận" as UC36
   }
 
 }
@@ -184,7 +184,7 @@ Free --> UC29
 Free --> UC30
 Free --> UC31
 
-Momo --> UC36
+MoMo --> UC36
 
 UC31 ..> UC36 : <<include>>
 
@@ -200,6 +200,6 @@ UC31 ..> UC36 : <<include>>
 | Guest | UC-04, UC-05/06, UC-07, UC-10 |
 | Free User | UC-12/13/15, UC-14/16, UC-17, UC-18/19/20, UC-26/27, UC-28, UC-29, UC-30, UC-31 |
 | Premium User | UC-32/33 (+ tất cả của Free User) |
-| PayOS | UC-36 |
+| MoMo | UC-36 |
 | Colab VM1 | UC-32/33 (EN Realtime) |
 | Colab VM2 | UC-12/13/15 (Normal), UC-32/33 (VI Realtime) |

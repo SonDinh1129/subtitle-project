@@ -22,7 +22,7 @@ Tất cả biểu đồ dưới đây viết bằng cú pháp Mermaid. Copy vào
 14. [UC-29: Xem thông tin tài khoản](#uc-29-xem-thông-tin-tài-khoản)
 15. [UC-30: Đăng xuất](#uc-30-đăng-xuất)
 16. [UC-31: Tạo Order Nâng cấp Premium](#uc-31-tạo-order-nâng-cấp-premium) x
-17. [UC-36: Webhook & Xác nhận Premium](#uc-36-webhook--xác-nhận-premium)
+17. [UC-36: IPN & Xác nhận Premium](#uc-36-ipn--xác-nhận-premium)
 18. [UC-37: Colab VM2 xử lý ASR + MT (Normal)](#uc-37-colab-vm2-xử-lý-asr--mt-normal-mode)
 19. [UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-38-colab-vm2--vi-realtime-websocket-phowhisper)
 20. [UC-39: Health Check](#uc-39-health-check)
@@ -247,6 +247,7 @@ sequenceDiagram
     participant FE as Frontend (UploadPage)
     participant Flask as Flask Controller
     participant Auth as AuthContext
+    participant DB as Supabase DB
 
     Note over User,Auth: UC-14: Bị chặn Realtime Mode
     User->>FE: Chọn Realtime mode
@@ -260,9 +261,11 @@ sequenceDiagram
     Note over User,Auth: UC-16: Upload vượt giới hạn tháng
     User->>FE: Upload video thứ 6 trong tháng
     FE->>Flask: POST /api/upload (FormData + JWT)
-    Flask->>Flask: get_profile() → videos_used_this_month = 5
-    Flask->>Flask: needs_reset()? Nếu qua tháng mới → reset
-    Flask-->>FE: 403 { error: "Monthly limit reached", code: "LIMIT_REACHED" }
+    Flask->>Flask: Xác thực JWT, kiểm tra is_premium
+    Flask->>DB: RPC check_and_increment_video_count(uid, lim=5)
+    Note over DB: Atomic UPDATE WHERE videos_used < 5 RETURNING count
+    DB-->>Flask: [] (empty — đã đạt giới hạn)
+    Flask-->>FE: 403 { error: "Monthly video limit reached (5/month)", code: "LIMIT_REACHED" }
     FE-->>User: Dialog "Đã đạt giới hạn 5 video/tháng" + nút "Nâng cấp"
 ```
 
@@ -287,7 +290,11 @@ sequenceDiagram
     FE->>FE: Lưu sessionStorage, navigate("/editor?mode=realtime")
     Note over User: Redirect NGAY sang Editor, không chờ xử lý
 
-    FE->>Flask: GET /api/jobs/{id}/stream?token=JWT (EventSource)
+    FE->>Flask: POST /api/auth/sse-token (+ JWT)
+    Flask->>Flask: Tạo JWT 60 giây (sub=user_id, aud=authenticated)
+    Flask-->>FE: { token, expires_in: 60 }
+
+    FE->>Flask: GET /api/jobs/{id}/stream?token=<60s-token> (EventSource)
     Flask-->>FE: SSE stream opened + snapshot
 
     loop Mỗi segment nhận từ Pipeline
@@ -427,7 +434,7 @@ sequenceDiagram
     actor User
     participant FE as Frontend (EditorPage)
     participant Flask as Flask Controller
-    participant Model as Model
+    participant Thread as Background Thread
     participant FFmpeg as FFmpeg
 
     User->>FE: Click "Export Video" → chọn 720p, lang=vi
@@ -436,15 +443,23 @@ sequenceDiagram
 
     Flask->>Flask: require_auth, verify ownership
     Flask->>Flask: Validate resolution (360p/720p/1080p), lang (en/vi)
-    Flask->>Model: get_job(job_id) → check status === "done"
-    Flask->>Model: export_burned_video(job, "720p", "vi")
+    Flask->>Flask: get_job(job_id) → check status === "done"
+    Flask->>Flask: Tạo export_id (UUID), lưu vào _exports cache
+    Flask->>Thread: Start daemon thread: export_burned_video(job, "720p", "vi")
+    Flask-->>FE: 202 { export_id, status: "pending" }
 
-    Model->>FFmpeg: ffmpeg -i video.mp4 -vf "subtitles='vi.srt',scale=1280:720" output.mp4
-    Note over FFmpeg: Encode video với subtitle burned + scale resolution
-    FFmpeg-->>Model: outputs/{job_id}_vi_720p.mp4
-
-    Model-->>Flask: output_path
-    Flask-->>FE: 200 { filename, download_url: "/api/exports/{filename}" }
+    par FFmpeg chạy trong background
+        Thread->>FFmpeg: ffmpeg -i video.mp4 -vf "subtitles='vi.srt',scale=1280:720" output.mp4
+        Note over FFmpeg: Encode video với subtitle burned + scale resolution
+        FFmpeg-->>Thread: outputs/{job_id}_vi_720p.mp4
+        Thread->>Thread: Cập nhật _exports[export_id] = { status: "done", filename }
+    and Frontend poll
+        loop Mỗi 2 giây cho đến khi done/error
+            FE->>Flask: GET /api/export-status/{export_id} (+ JWT)
+            Flask->>Flask: Kiểm tra ownership (user_id)
+            Flask-->>FE: { export_id, status: "pending"/"done"/"error" }
+        end
+    end
 
     FE->>Flask: GET /api/exports/{filename}
     Flask->>Flask: Validate filename, check file exists
@@ -512,7 +527,7 @@ sequenceDiagram
     participant FE as Frontend (UpgradePage)
     participant Flask as Flask Backend
     participant DB as Supabase DB
-    participant PayOS as PayOS Gateway
+    participant MoMo as MoMo Gateway
 
     User->>FE: Click "Nâng cấp 99.000đ"
     FE->>Flask: POST /api/payment/create-order (+ JWT)
@@ -522,39 +537,40 @@ sequenceDiagram
         FE-->>User: "Bạn đã là Premium!"
     else Chưa Premium
         Flask->>DB: INSERT payments (status="pending", amount=99000)
-        Flask->>PayOS: Tạo payment link (amount, returnUrl, cancelUrl)
-        PayOS-->>Flask: { checkoutUrl }
+        Flask->>MoMo: Tạo payment link (amount, returnUrl, notifyUrl)
+        MoMo-->>Flask: { payUrl }
         Flask-->>FE: 200 { payment_url }
-        FE-->>User: Redirect sang trang thanh toán PayOS
-        User->>PayOS: Thanh toán (QR / Banking / Ví điện tử)
-        PayOS-->>User: Redirect về /upgrade/success
+        FE-->>User: Redirect sang trang thanh toán MoMo
+        User->>MoMo: Thanh toán (QR / Ví MoMo)
+        MoMo-->>User: Redirect về /upgrade/success
     end
 ```
 
 ---
 
-## UC-36: Webhook & Xác nhận Premium
+## UC-36: IPN & Xác nhận Premium
 
 ```mermaid
 sequenceDiagram
-    participant PayOS as PayOS Gateway
+    participant MoMo as MoMo Gateway
     participant Flask as Flask Backend
     participant DB as Supabase DB
     actor User
     participant FE as Frontend (/upgrade/success)
 
-    Note over PayOS,Flask: Server-to-server webhook
-    PayOS->>Flask: POST /api/payment/webhook { orderCode, status, signature }
-    Flask->>Flask: verify_payos_signature(CHECKSUM_KEY)
+    Note over MoMo,Flask: Server-to-server IPN (Instant Payment Notification)
+    MoMo->>Flask: POST /api/payment/ipn { orderId, resultCode, signature, ... }
+    Flask->>Flask: verify_momo_signature(SECRET_KEY)
     alt Signature không hợp lệ
-        Flask-->>PayOS: 400 { error: "Invalid signature" }
-    else Signature OK + thanh toán thành công
+        Flask-->>MoMo: 200 { ok: false }
+        Note over Flask: Luôn trả 200 để MoMo không retry
+    else Signature OK + resultCode == 0 (thanh toán thành công)
         Flask->>DB: UPDATE payments SET status = "paid"
-        Flask->>DB: UPDATE profiles SET premium_until = "9999-12-31"
-        Flask-->>PayOS: 200 OK
-    else Đã xử lý hoặc bị huỷ
+        Flask->>DB: UPDATE profiles SET premium_until = now + 1 năm
+        Flask-->>MoMo: 200 { ok: true }
+    else Đã xử lý hoặc bị huỷ (resultCode != 0)
         Flask->>DB: UPDATE payments SET status = "cancelled" (nếu cần)
-        Flask-->>PayOS: 200 OK
+        Flask-->>MoMo: 200 { ok: true }
     end
 
     Note over User,FE: Frontend xác nhận sau redirect
@@ -735,7 +751,7 @@ flowchart TB
 
     subgraph External ["External Systems"]
         SB[(Supabase<br/>Auth + DB)]
-        PayOS[PayOS<br/>Payment Gateway]
+        MoMo[MoMo<br/>Payment Gateway]
         ColabVM2[Colab VM2 — COLAB_URL<br/>Faster-Whisper + PhoWhisper + VinAI<br/>HTTP /transcribe_translate<br/>WS /ws/transcribe_vi_realtime]
         ColabVM1[Colab VM1 — COLAB_REALTIME_URL<br/>Kyutai stt-1b-en_fr + VinAI<br/>WS /ws/transcribe_kyutai]
         FF[FFmpeg<br/>Local]
@@ -772,8 +788,8 @@ flowchart TB
 
     ED --> UG
     UG -->|POST /payment/create-order| PC
-    PC -->|Create link| PayOS
-    PayOS -->|Webhook| PC
+    PC -->|Create link| MoMo
+    MoMo -->|IPN POST /payment/ipn| PC
     PC -->|Update premium| SB
 
     AC <-->|get_profile| SB
@@ -803,11 +819,11 @@ flowchart TB
 | UC-17 | Editor — Tải subtitle | Free/Premium User |
 | UC-18/19/20 | Editor — Chỉnh sửa | Free/Premium User |
 | UC-26/27 | Download SRT | Free/Premium User, Flask |
-| UC-28 | Export Video | Free/Premium User, Flask, FFmpeg |
+| UC-28 | Export Video (async) | Free/Premium User, Flask, FFmpeg |
 | UC-29 | Xem tài khoản | Free/Premium User, Flask, Supabase |
 | UC-30 | Đăng xuất | Free/Premium User, Supabase |
-| UC-31 | Tạo Order Premium | Free User, Flask, PayOS |
-| UC-36 | Webhook & Xác nhận | PayOS, Flask, Supabase, Frontend |
+| UC-31 | Tạo Order Premium | Free User, Flask, MoMo |
+| UC-36 | IPN & Xác nhận | MoMo, Flask, Supabase, Frontend |
 | UC-37 | Colab VM2 — Normal ASR+MT | Flask, VM2, Faster-Whisper/PhoWhisper, VinAI |
 | UC-38 | Colab VM2 — VI Realtime WS | Flask, VM2, Silero VAD, PhoWhisper-large |
 | UC-39 | Health Check | Flask, VM1, VM2, Silero VAD |

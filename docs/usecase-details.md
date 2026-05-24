@@ -192,11 +192,11 @@
 | **Mã UC** | UC-28 |
 | **Tên** | Xuất video đã burn subtitle |
 | **Actor** | Free User |
-| **Mô tả** | User chọn độ phân giải và xuất video với subtitle được burn cứng vào frame |
+| **Mô tả** | User chọn độ phân giải và xuất video với subtitle được burn cứng vào frame; export chạy bất đồng bộ ở backend |
 | **Tiền điều kiện** | UC-17 đang active; job đã có kết quả subtitle |
-| **Hậu điều kiện** | Video mới với subtitle burned được tạo; user tải về hoặc nhận link download |
-| **Luồng chính** | 1. User nhấn "Export video" trong Editor<br>2. Chọn độ phân giải (360p / 720p / 1080p)<br>3. Hệ thống xử lý burn subtitle vào video (backend)<br>4. Hiển thị progress<br>5. Hoàn tất → hiện nút tải về |
-| **Luồng ngoại lệ** | 3a. Xử lý lỗi → hiện thông báo lỗi |
+| **Hậu điều kiện** | Video mới với subtitle burned được tạo; user tải về qua link download |
+| **Luồng chính** | 1. User nhấn "Export video" trong Editor<br>2. Chọn độ phân giải (360p / 720p / 1080p)<br>3. `POST /api/export` → backend trả ngay `202 { export_id, status: "pending" }`<br>4. FFmpeg chạy trong background thread, cập nhật status vào _exports cache<br>5. Frontend poll `GET /api/export-status/{export_id}` mỗi 2 giây<br>6. Khi `status: "done"` → frontend tải file từ `download_url` |
+| **Luồng ngoại lệ** | 4a. FFmpeg lỗi → `status: "error"` → frontend hiện thông báo lỗi |
 | **Quan hệ** | `<<include>>` UC-17 |
 
 ---
@@ -215,8 +215,8 @@
 | **Mô tả** | User xem thông tin cá nhân, chỉnh sửa họ tên, đổi mật khẩu, hoặc xóa tài khoản |
 | **Tiền điều kiện** | User đã đăng nhập |
 | **Hậu điều kiện** | Thông tin được cập nhật trên hệ thống |
-| **Luồng chính** | 1. User vào trang `/profile` qua menu Header<br>2. Hệ thống hiển thị email (read-only), họ tên, ngày tham gia<br>3. User có thể chỉnh sửa họ tên → nhấn "Lưu thay đổi"<br>4. User có thể đổi mật khẩu: nhập mật khẩu hiện tại → mật khẩu mới → xác nhận<br>5. Hệ thống xác minh mật khẩu cũ trước khi cập nhật |
-| **Luồng thay thế** | 4a. Mật khẩu hiện tại sai → hiện lỗi, không thực hiện đổi<br>6a. User nhấn "Xóa tài khoản" → nhập lại email xác nhận → xóa toàn bộ dữ liệu → đăng xuất |
+| **Luồng chính** | 1. User vào trang `/profile` qua menu Header<br>2. Hệ thống hiển thị email (read-only), họ tên, ngày tham gia<br>3. User có thể chỉnh sửa họ tên → nhấn "Lưu thay đổi"<br>4. User có thể đổi mật khẩu: nhập mật khẩu hiện tại → mật khẩu mới → xác nhận<br>5. Frontend xác minh mật khẩu hiện tại qua `supabase.auth.signInWithPassword` (client-side gate)<br>6. Nếu đúng → gọi `POST /api/auth/change-password` với mật khẩu mới → backend dùng Admin API cập nhật |
+| **Luồng thay thế** | 4a. Mật khẩu hiện tại sai → frontend hiện lỗi ngay, không gọi backend<br>6a. User nhấn "Xóa tài khoản" → nhập lại email xác nhận + mật khẩu → frontend xác minh qua Supabase → gọi `DELETE /api/auth/account` → xóa toàn bộ dữ liệu → đăng xuất |
 | **Luồng ngoại lệ** | 3a. Họ tên > 200 ký tự → hiện lỗi validation |
 | **Quan hệ** | — |
 
@@ -244,25 +244,25 @@
 | **Mã UC** | UC-31 |
 | **Tên** | Nâng cấp tài khoản lên Premium |
 | **Actor** | Free User |
-| **Mô tả** | User chọn gói Premium, thanh toán qua PayOS, hệ thống kích hoạt quyền Premium sau khi xác nhận |
+| **Mô tả** | User chọn gói Premium, thanh toán qua MoMo, hệ thống kích hoạt quyền Premium sau khi xác nhận |
 | **Tiền điều kiện** | User đã đăng nhập; chưa có Premium hoặc Premium đã hết hạn |
-| **Hậu điều kiện** | Trường `premium_until` được cập nhật; user có quyền Premium |
-| **Luồng chính** | 1. User vào trang `/upgrade`<br>2. Nhấn "Nâng cấp ngay"<br>3. Hệ thống tạo payment order → nhận `payment_url` từ PayOS<br>4. Trình duyệt redirect đến trang thanh toán PayOS<br>5. User hoàn tất thanh toán<br>6. PayOS gọi webhook UC-36 → hệ thống kích hoạt Premium<br>7. User được redirect về `/upgrade/success` |
-| **Luồng ngoại lệ** | 4a. User huỷ thanh toán → quay lại trang Upgrade<br>6a. Webhook thất bại → Premium chưa được kích hoạt, cần liên hệ hỗ trợ |
+| **Hậu điều kiện** | Trường `premium_until` được cập nhật; user có quyền Premium 1 năm |
+| **Luồng chính** | 1. User vào trang `/upgrade`<br>2. Nhấn "Nâng cấp ngay"<br>3. Hệ thống tạo payment order → nhận `payment_url` từ MoMo<br>4. Trình duyệt redirect đến trang thanh toán MoMo<br>5. User hoàn tất thanh toán<br>6. MoMo gọi IPN UC-36 → hệ thống kích hoạt Premium<br>7. User được redirect về `/upgrade/success` |
+| **Luồng ngoại lệ** | 4a. User huỷ thanh toán → quay lại trang Upgrade<br>6a. IPN thất bại → Premium chưa được kích hoạt, cần liên hệ hỗ trợ |
 | **Quan hệ** | `<<include>>` UC-36 |
 
 ---
 
-### UC-36: Webhook xác nhận thanh toán
+### UC-36: IPN xác nhận thanh toán
 
 | Trường | Nội dung |
 |--------|----------|
 | **Mã UC** | UC-36 |
-| **Tên** | Xử lý webhook xác nhận thanh toán từ PayOS |
-| **Actor** | PayOS (hệ thống ngoài) |
-| **Mô tả** | PayOS gọi endpoint backend sau khi thanh toán thành công để kích hoạt Premium cho user |
-| **Tiền điều kiện** | User đã hoàn tất thanh toán trên PayOS |
-| **Hậu điều kiện** | `premium_until` được cập nhật; user có quyền Premium |
-| **Luồng chính** | 1. PayOS POST đến `/payment/webhook` với thông tin giao dịch<br>2. Backend xác minh chữ ký webhook<br>3. Tìm user theo order ID<br>4. Cập nhật `premium_until` trong database<br>5. Trả `200 OK` cho PayOS |
-| **Luồng ngoại lệ** | 2a. Chữ ký không hợp lệ → trả `400`, bỏ qua<br>3a. Không tìm thấy order → trả `404`, log lỗi |
+| **Tên** | Xử lý IPN xác nhận thanh toán từ MoMo |
+| **Actor** | MoMo (hệ thống ngoài) |
+| **Mô tả** | MoMo gọi IPN endpoint backend sau khi thanh toán thành công để kích hoạt Premium cho user |
+| **Tiền điều kiện** | User đã hoàn tất thanh toán trên MoMo |
+| **Hậu điều kiện** | `premium_until` được cập nhật thành `now + 1 năm`; user có quyền Premium |
+| **Luồng chính** | 1. MoMo POST đến `/api/payment/ipn` với thông tin giao dịch<br>2. Backend xác minh chữ ký MoMo<br>3. Tìm user theo order ID, kiểm tra `resultCode == 0`<br>4. Cập nhật `premium_until = now + 1 năm` trong database<br>5. Trả `200 { ok: true }` cho MoMo |
+| **Luồng ngoại lệ** | 2a. Chữ ký không hợp lệ → trả `200 { ok: false }` (MoMo yêu cầu luôn trả 200)<br>3a. Không tìm thấy order → trả `200 { ok: false }`, log lỗi |
 | **Quan hệ** | `<<include>>` bởi UC-31 |
