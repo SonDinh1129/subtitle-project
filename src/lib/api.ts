@@ -365,17 +365,18 @@ export function pollExportUntilDone(
   intervalMs = 2000,
 ): Promise<ExportResponse> {
   return new Promise((resolve, reject) => {
-    const id = setInterval(async () => {
+    const tick = async () => {
       try {
         const r = await getExportStatus(exportId)
         onUpdate?.(r)
-        if (r.status === "done") { clearInterval(id); resolve(r) }
-        if (r.status === "error") { clearInterval(id); reject(new Error(r.error ?? "Export failed")) }
+        if (r.status === "done") return resolve(r)
+        if (r.status === "error") return reject(new Error(r.error ?? "Export failed"))
+        setTimeout(tick, intervalMs)
       } catch (err) {
-        clearInterval(id)
         reject(err)
       }
-    }, intervalMs)
+    }
+    tick()
   })
 }
 

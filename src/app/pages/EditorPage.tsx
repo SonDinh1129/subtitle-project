@@ -664,9 +664,10 @@ export function EditorPage() {
     try {
       const started = await exportVideoApi(currentJobId, resolution, subtitleLang);
       const data = await pollExportUntilDone(started.export_id);
+      if (!data.download_url || !data.filename) throw new Error("Export completed but download URL is missing");
       const a = document.createElement("a");
-      a.href = data.download_url!;
-      a.download = data.filename!;
+      a.href = data.download_url;
+      a.download = data.filename;
       document.body.appendChild(a);
       a.click();
       a.remove();

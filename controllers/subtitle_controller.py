@@ -15,9 +15,21 @@ import queue
 import uuid as _uuid
 from pathlib import Path
 
-# In-memory export registry: export_id → {"status": "pending"|"done"|"error", "filename"?: str, "error"?: str}
+# In-memory export registry: export_id → {"status": "pending"|"done"|"error", "user_id": str, "filename"?: str, "error"?: str}
 _exports: dict[str, dict] = {}
 _exports_lock = threading.Lock()
+_export_timestamps: dict[str, float] = {}
+_EXPORT_CACHE_TTL = 3600  # 1 hour
+
+
+def _evict_stale_exports() -> None:
+    """Remove exports older than _EXPORT_CACHE_TTL. Must be called with _exports_lock held."""
+    import time as _t
+    cutoff = _t.monotonic() - _EXPORT_CACHE_TTL
+    stale = [eid for eid, ts in _export_timestamps.items() if ts < cutoff]
+    for eid in stale:
+        _exports.pop(eid, None)
+        _export_timestamps.pop(eid, None)
 
 from flask import (
     Blueprint, request, jsonify,
@@ -368,6 +380,7 @@ def serve_video(filename):
 
 @subtitle_bp.post("/export")
 @require_auth
+@limiter.limit("10/minute")
 def export_video():
     """Start async export. Returns 202 with export_id; poll GET /export-status/<export_id>."""
     payload = request.get_json(silent=True) or {}
@@ -390,9 +403,12 @@ def export_video():
     if job.get("status") != JobStatus.DONE:
         return jsonify({"error": f"Job not ready (status: {job.get('status')})"}), 409
 
+    import time as _t
     export_id = str(_uuid.uuid4())
     with _exports_lock:
         _exports[export_id] = {"status": "pending", "user_id": g.user_id}
+        _export_timestamps[export_id] = _t.monotonic()
+        _evict_stale_exports()
 
     def _run(app, eid, j, res, lng):
         with app.app_context():
@@ -400,10 +416,11 @@ def export_video():
                 output_path = export_burned_video(j, resolution=res, lang=lng)
                 filename = Path(output_path).name
                 with _exports_lock:
-                    _exports[eid] = {"status": "done", "filename": filename}
+                    _exports[eid].update({"status": "done", "filename": filename})
             except Exception as exc:
+                current_app.logger.exception("Export %s failed", eid)
                 with _exports_lock:
-                    _exports[eid] = {"status": "error", "error": str(exc)}
+                    _exports[eid].update({"status": "error", "error": "Export failed"})
 
     threading.Thread(
         target=_run,
