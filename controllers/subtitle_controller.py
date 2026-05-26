@@ -54,6 +54,8 @@ from models.subtitle_optimizer import (
     parse_srt, write_srt, optimize_subtitles, get_optimization_stats,
 )
 from models.subtitle_quality import analyze_srt_file
+import urllib.error as _urllib_error
+from models.translation_quality import evaluate_translation, words_to_sentences as _words_to_sentences, ALLOWED_MODELS as _ALLOWED_TQ_MODELS
 
 # ─────────────────────────────────────────────────────────────────
 # Blueprint
@@ -563,4 +565,71 @@ def quality_report(job_id: str):
         return jsonify(error=f"{lang.upper()} SRT not found"), 404
 
     report = analyze_srt_file(srt_path, lang=lang)
+    return jsonify(report.to_dict())
+
+
+# ─────────────────────────────────────────────────────────────────
+# TRANSLATION QUALITY (LLM-as-judge via ChatGPT)
+# ─────────────────────────────────────────────────────────────────
+
+@subtitle_bp.get("/jobs/<job_id>/translation-quality")
+@require_auth
+@limiter.limit("10/minute")
+def translation_quality(job_id: str):
+    """
+    Đánh giá chất lượng bản dịch EN→VI bằng ChatGPT (LLM-as-judge).
+    Gửi toàn bộ cặp EN/VI trong job lên ChatGPT để đánh giá.
+
+    Query params:
+        model: OpenAI model — gpt-4o-mini (default) hoặc gpt-4o
+
+    Yêu cầu: OPENAI_API_KEY env var phải được set.
+
+    Response: TranslationQualityReport JSON với điểm trung bình + chi tiết từng cặp.
+    """
+    job = get_job(job_id)
+    if not job:
+        return jsonify(error="Job not found"), 404
+    if job.get("user_id") != g.user_id:
+        return jsonify(error="Forbidden"), 403
+    if job.get("status") != JobStatus.DONE:
+        return jsonify(error="Job not done yet"), 400
+
+    en_words = job.get("english_words") or []
+    vi_words = job.get("vietnamese_words") or []
+    if not en_words or not vi_words:
+        return jsonify(error="No translation data found for this job"), 400
+
+    # Validate model trước khi gọi bất kỳ thứ gì tốn tiền
+    model = request.args.get("model", "gpt-4o-mini")
+    if model not in _ALLOWED_TQ_MODELS:
+        return jsonify(error=f"model must be one of: {sorted(_ALLOWED_TQ_MODELS)}"), 400
+
+    en_sentences = _words_to_sentences(en_words)
+    vi_sentences = _words_to_sentences(vi_words)
+
+    if abs(len(en_sentences) - len(vi_sentences)) > 5:
+        current_app.logger.warning(
+            "Sentence count mismatch for job %s: EN=%d VI=%d — some pairs will be skipped",
+            job_id, len(en_sentences), len(vi_sentences),
+        )
+
+    try:
+        report = evaluate_translation(en_sentences, vi_sentences, model=model)
+    except EnvironmentError as e:
+        return jsonify(error=str(e)), 503
+    except _urllib_error.HTTPError as e:
+        if e.code == 429:
+            return jsonify(error="OpenAI rate limit reached, please retry later"), 429
+        current_app.logger.error("OpenAI HTTP error %s for job %s", e.code, job_id)
+        return jsonify(error=f"OpenAI API error ({e.code})"), 502
+    except _urllib_error.URLError as e:
+        current_app.logger.error("OpenAI network error for job %s: %s", job_id, e.reason)
+        return jsonify(error="Could not reach OpenAI API"), 502
+    except ValueError as e:
+        return jsonify(error=str(e)), 422
+    except Exception:
+        current_app.logger.exception("Translation quality evaluation failed for job %s", job_id)
+        return jsonify(error="Evaluation failed — see server logs"), 502
+
     return jsonify(report.to_dict())
