@@ -818,11 +818,10 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         update_job(job_id, status=JobStatus.ERROR, error=str(exc))
 
     finally:
-        # Delete local video and audio after pipeline (SRTs kept for 7-day retention)
+        # Keep video for Editor playback; cleanup daemon removes it after 7 days.
+        # Only delete the intermediate audio WAV which is not needed after pipeline.
         if audio_path and os.path.exists(audio_path):
             os.remove(audio_path)
-        if video_path and os.path.exists(video_path):
-            os.remove(video_path)
 
 
 def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str | None = None) -> None:
@@ -951,6 +950,5 @@ def run_pipeline_realtime(job_id: str, colab_url: str, colab_realtime_url: str |
         emit_job_event(job_id, {"type": "error", "message": str(exc)})
 
     finally:
-        # Delete local video after pipeline (SRTs kept for 7-day retention)
-        if video_path and os.path.exists(video_path):
-            os.remove(video_path)
+        # Keep video for Editor playback; cleanup daemon removes it after 7 days.
+        pass
