@@ -85,6 +85,7 @@ Guest → Đăng ký/Đăng nhập → Free User
 | UC-26 | Tải file SRT tiếng Anh | Download subtitles_en.srt |
 | UC-27 | Tải file SRT tiếng Việt | Download subtitles_vi.srt |
 | UC-28 | Export video burned subtitle | Chọn ngôn ngữ + resolution (360p/720p/1080p) → POST /export → 202 + polling → tải video với subtitle đã burn |
+| UC-41 | Đánh giá chất lượng bản dịch | GET /api/jobs/:id/translation-quality → gửi toàn bộ cặp EN/VI lên ChatGPT → trả điểm trung bình + chi tiết từng cặp (LLM-as-judge) |
 
 ### Account
 

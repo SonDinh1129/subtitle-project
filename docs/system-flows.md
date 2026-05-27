@@ -27,6 +27,7 @@ Tất cả biểu đồ dưới đây viết bằng cú pháp Mermaid. Copy vào
 19. [UC-38: Colab VM2 — VI Realtime WebSocket (PhoWhisper)](#uc-38-colab-vm2--vi-realtime-websocket-phowhisper)
 20. [UC-39: Health Check](#uc-39-health-check)
 21. [UC-40: Colab VM1 — EN Realtime WebSocket (Kyutai)](#uc-40-colab-vm1--en-realtime-websocket-kyutai)
+22. [UC-41: Đánh giá chất lượng bản dịch (LLM-as-judge)](#uc-41-đánh-giá-chất-lượng-bản-dịch-llm-as-judge)
 
 ---
 
@@ -729,6 +730,70 @@ sequenceDiagram
 
 ---
 
+## UC-41: Đánh giá chất lượng bản dịch (LLM-as-judge)
+
+```mermaid
+sequenceDiagram
+    participant Client as Frontend / API Client
+    participant Flask as Flask Backend
+    participant DB as Job Store (in-memory / Supabase)
+    participant TQ as translation_quality.py
+    participant OAI as OpenAI API (gpt-4o-mini / gpt-4o)
+
+    Client->>Flask: GET /api/jobs/:id/translation-quality?model=gpt-4o-mini
+    Note over Client,Flask: Authorization: Bearer <JWT>
+
+    Flask->>Flask: xác thực JWT → lấy user_id
+    Flask->>DB: get_job(job_id)
+    DB-->>Flask: job dict
+
+    alt job không tồn tại
+        Flask-->>Client: 404 { error: "Job not found" }
+    else job.user_id ≠ current user
+        Flask-->>Client: 403 { error: "Forbidden" }
+    else job.status ≠ "done"
+        Flask-->>Client: 400 { error: "Job not done yet" }
+    else model không trong allowlist
+        Flask-->>Client: 400 { error: "model must be one of: ..." }
+    end
+
+    Flask->>TQ: words_to_sentences(english_words, gap=0.8s)
+    TQ-->>Flask: en_sentences[]
+    Flask->>TQ: words_to_sentences(vietnamese_words, gap=0.8s)
+    TQ-->>Flask: vi_sentences[]
+
+    Note over Flask,TQ: Nếu |len(EN) - len(VI)| > 5 → log warning
+
+    Flask->>TQ: evaluate_translation(en_sentences, vi_sentences, model)
+    TQ->>TQ: ước tính token, cắt bớt nếu > 100k tokens
+    TQ->>TQ: build prompt (numbered EN/VI pairs)
+    TQ->>OAI: POST /v1/chat/completions { model, messages, temperature:0, max_tokens:4096, response_format: json_object }
+
+    alt OPENAI_API_KEY chưa set
+        TQ-->>Flask: raise EnvironmentError
+        Flask-->>Client: 503 { error: "OPENAI_API_KEY not set" }
+    else OpenAI rate limit (HTTP 429)
+        OAI-->>TQ: 429
+        TQ-->>Flask: raise HTTPError(429)
+        Flask-->>Client: 429 { error: "OpenAI rate limit reached, please retry later" }
+    else OpenAI lỗi khác (5xx)
+        OAI-->>TQ: 5xx
+        TQ-->>Flask: raise HTTPError
+        Flask-->>Client: 502 { error: "OpenAI API error (5xx)" }
+    else Network timeout / URLError
+        TQ-->>Flask: raise URLError
+        Flask-->>Client: 502 { error: "Could not reach OpenAI API" }
+    end
+
+    OAI-->>TQ: { choices[0].message.content: '{"evaluations":[...]}' }
+    TQ->>TQ: parse JSON → _safe_score() clamp 1–10 → _safe_issues() → list[PairScore]
+    TQ-->>Flask: TranslationQualityReport
+
+    Flask-->>Client: 200 { model, total_pairs, evaluated_pairs, scores: {avg, min, max}, pairs: [...] }
+```
+
+---
+
 ## Tổng quan luồng dữ liệu hệ thống
 
 ```mermaid
@@ -828,3 +893,4 @@ flowchart TB
 | UC-38 | Colab VM2 — VI Realtime WS | Flask, VM2, Silero VAD, PhoWhisper-large |
 | UC-39 | Health Check | Flask, VM1, VM2, Silero VAD |
 | UC-40 | Colab VM1 — EN Realtime WS | Flask, VM1, Kyutai stt-1b-en_fr, VinAI |
+| UC-41 | Đánh giá chất lượng bản dịch | Client, Flask, translation_quality.py, OpenAI API |

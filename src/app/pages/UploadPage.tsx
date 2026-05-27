@@ -312,10 +312,12 @@ export function UploadPage() {
                     {state === "error" ? (
                       <>
                         <p className="text-red-600 dark:text-red-300 mb-1">
-                          {isVi ? "Loại tệp không hợp lệ" : "Invalid file type"}
+                          {uploadError
+                            ? (isVi ? "Đã xảy ra lỗi" : "Upload failed")
+                            : (isVi ? "Loại tệp không hợp lệ" : "Invalid file type")}
                         </p>
                         <p className="text-sm text-red-400 dark:text-red-200/80">
-                          {isVi ? "Vui lòng tải lên tệp video hợp lệ" : "Please upload a valid video file"}
+                          {uploadError ?? (isVi ? "Vui lòng tải lên tệp video hợp lệ" : "Please upload a valid video file")}
                         </p>
                       </>
                     ) : (

@@ -266,3 +266,20 @@
 | **Luồng chính** | 1. MoMo POST đến `/api/payment/ipn` với thông tin giao dịch<br>2. Backend xác minh chữ ký MoMo<br>3. Tìm user theo order ID, kiểm tra `resultCode == 0`<br>4. Cập nhật `premium_until = now + 1 năm` trong database<br>5. Trả `200 { ok: true }` cho MoMo |
 | **Luồng ngoại lệ** | 2a. Chữ ký không hợp lệ → trả `200 { ok: false }` (MoMo yêu cầu luôn trả 200)<br>3a. Không tìm thấy order → trả `200 { ok: false }`, log lỗi |
 | **Quan hệ** | `<<include>>` bởi UC-31 |
+
+---
+
+### UC-41: Đánh giá chất lượng bản dịch
+
+| Trường | Nội dung |
+|--------|----------|
+| **Mã UC** | UC-41 |
+| **Tên** | Đánh giá chất lượng bản dịch EN→VI (LLM-as-judge) |
+| **Actor** | Free User, Premium User |
+| **Mô tả** | Sau khi job hoàn thành, user gọi endpoint để gửi toàn bộ cặp EN/VI lên ChatGPT REST API; ChatGPT trả điểm chất lượng (1–10) và nhận xét từng cặp |
+| **Tiền điều kiện** | Job tồn tại, `status == "done"`, có `english_words` và `vietnamese_words`; `OPENAI_API_KEY` đã được set trong môi trường |
+| **Hậu điều kiện** | Trả về báo cáo JSON gồm điểm trung bình, min, max và chi tiết từng cặp EN/VI |
+| **Luồng chính** | 1. Client gửi `GET /api/jobs/:id/translation-quality?model=gpt-4o-mini`<br>2. Backend xác thực JWT, kiểm tra ownership (403 nếu không phải chủ job)<br>3. Kiểm tra `status == "done"` (400 nếu chưa xong)<br>4. Kiểm tra `model` nằm trong allowlist `{gpt-4o-mini, gpt-4o}` (400 nếu không hợp lệ)<br>5. Gom word-level dicts thành câu theo khoảng lặng ≥ 0.8s<br>6. Ước tính token, cắt bớt nếu vượt ~100k tokens<br>7. Gửi prompt + danh sách cặp lên OpenAI `/v1/chat/completions`<br>8. Parse response, clamp score 1–10, coerce issues về `list[str]`<br>9. Trả `TranslationQualityReport` JSON |
+| **Luồng thay thế** | 7a. Số câu EN và VI lệch > 5 → log warning, tiếp tục (zip truncate) |
+| **Luồng ngoại lệ** | `OPENAI_API_KEY` chưa set → 503<br>OpenAI rate limit (HTTP 429) → 429, retry-able<br>OpenAI HTTP error khác → 502<br>Network timeout/error → 502<br>Model không hợp lệ / không có cặp nào / response sai format → 422 |
+| **Quan hệ** | `<<include>>` UC-17 (phải có job done); Rate limit 10 req/phút |

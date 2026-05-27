@@ -102,8 +102,9 @@ rectangle "SubAI" {
   }
 
   package "Xuất kết quả" {
-    usecase "Download SRT "     as UC26
-    usecase "Export video burned " as UC28
+    usecase "Download SRT "              as UC26
+    usecase "Export video burned "       as UC28
+    usecase "Đánh giá chất lượng dịch " as UC41
   }
 
 }
@@ -115,6 +116,7 @@ Free    --> UC17
 Free    --> UC18
 Free    --> UC26
 Free    --> UC28
+Free    --> UC41
 Premium --> UC32
 
 ' Hệ thống ngoài
@@ -130,6 +132,7 @@ UC17 ..> UC11 : <<include>>
 UC18 ..> UC17 : <<include>>
 UC26 ..> UC17 : <<include>>
 UC28 ..> UC17 : <<include>>
+UC41 ..> UC17 : <<include>>
 
 ' <<extend>>
 UC14 ..> UC12 : <<extend>>
@@ -198,7 +201,7 @@ UC31 ..> UC36 : <<include>>
 | Actor | Use Cases |
 |-------|-----------|
 | Guest | UC-04, UC-05/06, UC-07, UC-10 |
-| Free User | UC-12/13/15, UC-14/16, UC-17, UC-18/19/20, UC-26/27, UC-28, UC-29, UC-30, UC-31 |
+| Free User | UC-12/13/15, UC-14/16, UC-17, UC-18/19/20, UC-26/27, UC-28, UC-41, UC-29, UC-30, UC-31 |
 | Premium User | UC-32/33 (+ tất cả của Free User) |
 | MoMo | UC-36 |
 | Colab VM1 | UC-32/33 (EN Realtime) |
