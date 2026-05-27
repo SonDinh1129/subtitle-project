@@ -248,6 +248,7 @@ import base64, json, time, threading, queue
 
 app = Flask(__name__)
 CORS(app)
+app.config["SOCK_SERVER_TIMEOUT"] = None  # disable flask-sock 120s timeout
 sock = Sock(app)
 
 # Only one Kyutai streaming session at a time — the mimi streaming context is not re-entrant.
