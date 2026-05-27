@@ -319,8 +319,10 @@ class RealtimeStreamClient:
                                     print(f"[RealtimeStreamClient] Failed to parse server message: {e!r}")
 
                         await asyncio.gather(sender(), receiver())
+                        print(f"[RealtimeStreamClient] gather() completed normally after retry={retry_count}")
                         break  # success, exit retry loop
                 except Exception as exc:
+                    print(f"[RealtimeStreamClient] gather() raised exception (retry={retry_count}): {exc!r}")
                     if retry_count >= self.MAX_RETRIES:
                         break
                     delay = self.BACKOFF[min(retry_count, len(self.BACKOFF) - 1)]

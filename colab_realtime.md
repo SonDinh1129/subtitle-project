@@ -468,7 +468,7 @@ def transcribe_kyutai_ws(ws):
         worker.join(timeout=5)
         _streaming_active = False
         _kyutai_lock.release()
-        logger.info("⚡ Kyutai WS connection closed")
+        logger.info(f"⚡ Kyutai WS connection closed — total frames processed: {frame_idx}")
 
 @app.route("/health")
 def health():
