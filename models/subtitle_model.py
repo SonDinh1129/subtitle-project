@@ -812,6 +812,9 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         )
 
     except Exception as exc:
+        import traceback
+        print(f"[pipeline ERROR] job={job_id}: {exc}")
+        traceback.print_exc()
         update_job(job_id, status=JobStatus.ERROR, error=str(exc))
 
     finally:
