@@ -664,7 +664,8 @@ def words_to_srt_string(words: list[dict], max_chars: int = 42) -> str:
             t0 = wd["start"]
         wlen = len(word) + 1
         if current_chars + wlen > max_chars and current:
-            subtitles.append({"text": " ".join(current), "start": t0, "end": wd["start"]})
+            end = max(wd["start"], t0 + 0.1)
+            subtitles.append({"text": " ".join(current), "start": t0, "end": end})
             current, current_chars, t0 = [word], len(word), wd["start"]
         else:
             current.append(word)
