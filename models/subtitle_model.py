@@ -613,12 +613,12 @@ def _prepare_segments(audio_path: str, min_duration: float = 2.0) -> list[dict]:
     if not segments:
         raise RuntimeError("No speech detected in the video.")
     wav_duration = wav.shape[-1] / 16000
-    print(f"[_prepare_segments] wav_duration={wav_duration:.1f}s  vad_segments={len(segments)}  last_seg_end={segments[-1]['end']:.1f}s")
+    print(f"[_prepare_segments] wav_duration={wav_duration:.1f}s  vad_segments={len(segments)}  last_seg_end={segments[-1]['end']:.1f}s", flush=True)
     split_segs: list[dict] = []
     for s in segments:
         split_segs.extend(split_long_segment(s, max_duration=25.0))
     segments = merge_short_segments(split_segs, min_duration=min_duration, max_duration=25.0)
-    print(f"[_prepare_segments] after_merge={len(segments)} segments  last_end={segments[-1]['end']:.1f}s")
+    print(f"[_prepare_segments] after_merge={len(segments)} segments  last_end={segments[-1]['end']:.1f}s", flush=True)
     return encode_segments_for_colab(segments, wav)
 
 
