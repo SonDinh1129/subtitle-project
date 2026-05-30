@@ -155,6 +155,45 @@ class ColabClient:
                 
         raise RuntimeError(f"Failed after {max_retries} attempts: {last_error}")
 
+    def transcribe_translate_batched(
+        self,
+        segments_data: list[dict],
+        translation_mode: str = "segment",
+        source_lang: str = "en",
+        batch_size: int = 15,
+        timeout: int = 600,
+        on_batch_done: callable = None,
+    ) -> dict:
+        """Send segments in small batches to avoid Colab OOM on long videos.
+
+        Merges english_words, vietnamese_words, english_text, vietnamese_text
+        from all batches into a single result dict.
+        on_batch_done(batch_idx, total_batches) called after each batch.
+        """
+        batches = [segments_data[i:i+batch_size] for i in range(0, len(segments_data), batch_size)]
+        total = len(batches)
+        all_en_words, all_vi_words = [], []
+        all_en_text, all_vi_text = [], []
+
+        for idx, batch in enumerate(batches):
+            print(f"[batch] {idx+1}/{total} — {len(batch)} segments", flush=True)
+            result = self.transcribe_translate(batch, translation_mode, source_lang, timeout)
+            all_en_words.extend(result.get("english_words", []))
+            all_vi_words.extend(result.get("vietnamese_words", []))
+            if result.get("english_text"):
+                all_en_text.append(result["english_text"])
+            if result.get("vietnamese_text"):
+                all_vi_text.append(result["vietnamese_text"])
+            if on_batch_done:
+                on_batch_done(idx + 1, total)
+
+        return {
+            "english_words":    all_en_words,
+            "vietnamese_words": all_vi_words,
+            "english_text":     "\n".join(all_en_text),
+            "vietnamese_text":  "\n".join(all_vi_text),
+        }
+
     def transcribe_translate_stream(
         self,
         segments_data: list[dict],
@@ -778,7 +817,16 @@ def run_pipeline(job_id: str, colab_url: str) -> None:
         segments_data = _prepare_segments(audio_path, min_duration=2.0)
 
         client = ColabClient(colab_url)
-        result = client.transcribe_translate(segments_data, translation_mode, source_lang=source_lang)
+
+        def _on_batch(done, total):
+            # progress: 40 → 78 during transcription batches
+            pct = 40 + int((done / total) * 38)
+            update_job(job_id, status=JobStatus.TRANSCRIBING, progress=pct)
+
+        result = client.transcribe_translate_batched(
+            segments_data, translation_mode, source_lang=source_lang,
+            on_batch_done=_on_batch,
+        )
 
         english_words    = result["english_words"]
         vietnamese_words = result["vietnamese_words"]
