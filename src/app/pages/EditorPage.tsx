@@ -768,10 +768,17 @@ export function EditorPage() {
 
   const isDualMode = subtitleDisplayMode === "dual-vi-top" || subtitleDisplayMode === "dual-en-top";
 
-  // Bypass time-based lookup CHỈ KHI đang streaming active (mọi mode).
-  // Khi stream xong hoặc user scrub lại, dùng time-based lookup bình thường
-  // để subtitle đồng bộ với vị trí video.
-  const isLiveStreaming = isRealtimeMode && streamStatus === "streaming" && isPlaying;
+  // Bypass time-based lookup CHỈ KHI đang streaming active VÀ playhead ở mép live.
+  // Mép live = currentTime nằm sau từ cuối cùng đã nhận (chưa có sub time-based cho
+  // vị trí đó). Khi user tua/scrub về quá khứ, currentTime < mép live → dùng
+  // time-based lookup để subtitle khớp đúng vị trí video.
+  const lastStreamedEnd = useMemo(() => {
+    const w = activeWords[activeWords.length - 1] ?? fallbackWords[fallbackWords.length - 1];
+    return w?.end ?? 0;
+  }, [activeWords, fallbackWords]);
+  const atLiveEdge = currentTime >= lastStreamedEnd - 1.0;
+  const isLiveStreaming =
+    isRealtimeMode && streamStatus === "streaming" && isPlaying && !isScrubbing && atLiveEdge;
   const textEnLive = isLiveStreaming
     ? (inProgressWords.length > 0
         ? inProgressWords.join(" ")
