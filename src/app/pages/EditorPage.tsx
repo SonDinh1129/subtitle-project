@@ -779,6 +779,19 @@ export function EditorPage() {
   const atLiveEdge = currentTime >= lastStreamedEnd - 1.0;
   const isLiveStreaming =
     isRealtimeMode && streamStatus === "streaming" && isPlaying && !isScrubbing && atLiveEdge;
+  // DEBUG: gỡ bỏ sau khi xác định nguyên nhân overlay không khớp khi tua.
+  console.log("[overlay-debug]", {
+    currentTime: currentTime.toFixed(2),
+    streamStatus,
+    isPlaying,
+    isScrubbing,
+    lastStreamedEnd: lastStreamedEnd.toFixed(2),
+    atLiveEdge,
+    isLiveStreaming,
+    textVi,
+    latestVi: latestRealtimeSegment?.vi,
+    currentSubVi: currentSubtitleVi?.text,
+  });
   const textEnLive = isLiveStreaming
     ? (inProgressWords.length > 0
         ? inProgressWords.join(" ")
