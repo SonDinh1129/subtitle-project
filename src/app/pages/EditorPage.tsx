@@ -187,6 +187,30 @@ function buildCaptionText(words: Word[], lineBreakIndex: number, visibleCount = 
   return `${line1Words.join(" ")}\n${line2Words.join(" ")}`;
 }
 
+// Wrap chuỗi 1 dòng thành tối đa 2 dòng, mỗi dòng ≤ maxChars (chuẩn CPL phụ đề).
+// Chọn điểm ngắt giữa từ sao cho 2 dòng cân bằng nhất.
+function wrapToTwoLines(text: string, maxChars = 42): string {
+  const t = text.trim();
+  if (t.length <= maxChars) return t;
+  const words = t.split(/\s+/);
+  let best = -1;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (let i = 1; i < words.length; i++) {
+    const left = words.slice(0, i).join(" ");
+    const right = words.slice(i).join(" ");
+    const score = Math.abs(left.length - right.length);
+    // Ưu tiên điểm giữ cả 2 dòng ≤ maxChars; nếu không có, lấy cân bằng nhất.
+    const fits = left.length <= maxChars && right.length <= maxChars;
+    const penalty = fits ? 0 : 1000;
+    if (penalty + score < bestScore) {
+      bestScore = penalty + score;
+      best = i;
+    }
+  }
+  if (best === -1) return t;
+  return `${words.slice(0, best).join(" ")}\n${words.slice(best).join(" ")}`;
+}
+
 function buildYouTubeCaptions(words: Word[]): CaptionSegment[] {
   if (words.length === 0) return [];
 
@@ -779,19 +803,6 @@ export function EditorPage() {
   const atLiveEdge = currentTime >= lastStreamedEnd - 1.0;
   const isLiveStreaming =
     isRealtimeMode && streamStatus === "streaming" && isPlaying && !isScrubbing && atLiveEdge;
-  // DEBUG: gỡ bỏ sau khi xác định nguyên nhân overlay không khớp khi tua.
-  console.log("[overlay-debug]", {
-    currentTime: currentTime.toFixed(2),
-    streamStatus,
-    isPlaying,
-    isScrubbing,
-    lastStreamedEnd: lastStreamedEnd.toFixed(2),
-    atLiveEdge,
-    isLiveStreaming,
-    textVi,
-    latestVi: latestRealtimeSegment?.vi,
-    currentSubVi: currentSubtitleVi?.text,
-  });
   const textEnLive = isLiveStreaming
     ? (inProgressWords.length > 0
         ? inProgressWords.join(" ")
@@ -802,21 +813,24 @@ export function EditorPage() {
     : textVi;
 
   const subtitleLines = useMemo(() => {
+    // Wrap mỗi dòng overlay thành tối đa 2 dòng ≤42 ký tự (CPL chuẩn).
+    const en = textEnLive ? wrapToTwoLines(textEnLive) : "";
+    const vi = textViLive ? wrapToTwoLines(textViLive) : "";
     switch (subtitleDisplayMode) {
       case "off":
         return [] as string[];
       case "en-only":
-        return textEnLive ? [textEnLive] : [];
+        return en ? [en] : [];
       case "vi-only":
-        return textViLive ? [textViLive] : [];
+        return vi ? [vi] : [];
       case "dual-vi-top":
-        return [textViLive, textEnLive].filter(Boolean);
+        return [vi, en].filter(Boolean);
       case "dual-en-top":
-        return [textEnLive, textViLive].filter(Boolean);
+        return [en, vi].filter(Boolean);
       default:
         return [] as string[];
     }
-  }, [subtitleDisplayMode, textEn, textVi, textEnLive, textViLive]);
+  }, [subtitleDisplayMode, textEnLive, textViLive]);
 
   const filteredSubtitles = useMemo(
     () => subtitles.filter((s) => s.text.toLowerCase().includes(searchTerm.toLowerCase())),
@@ -1123,7 +1137,7 @@ export function EditorPage() {
                             backgroundColor: `${bgColor}${Math.round(bgOpacity * 2.55).toString(16).padStart(2, "0")}`,
                             fontFamily: selectedFont,
                             fontSize: selectedFontSize === "Small" ? "14px" : selectedFontSize === "Medium" ? "18px" : selectedFontSize === "Large" ? "22px" : "26px",
-                            whiteSpace: subtitleMode === "progressive" ? "nowrap" : "normal",
+                            whiteSpace: "pre-line",
                           }}
                         >
                           {line}
