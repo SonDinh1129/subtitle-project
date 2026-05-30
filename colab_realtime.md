@@ -275,12 +275,18 @@ class WordSegmentAccumulator:
         if not self.words:
             return False
         duration = self.words[-1]["end"] - self.segment_start
-        # 0.7s silence hoặc 2.5s tối đa
+        char_count = sum(len(w["word"]) + 1 for w in self.words)
+        # Flush khi:
+        #  - 0.7s silence (người nói nghỉ giữa câu)
+        #  - 2.5s duration tối đa
+        #  - ~70 ký tự EN: đủ để bản dịch VI vừa 2 dòng (≤42 CPL/dòng).
+        #    Segment EN dài → VI dài hơn → CPL/CPS vượt ngưỡng.
         # 0.4s quá thấp: người nói lấy hơi giữa câu (~0.3-0.5s) cũng bị flush
         # → cụm từ bị cắt giữa chừng → VinAI mất ngữ cảnh → VI thiếu chữ
         return (
             (now_wall - self.last_word_wall_time) > 0.7
             or duration > 2.5
+            or char_count >= 70
         )
 
     def flush(self):
@@ -402,6 +408,11 @@ def transcribe_kyutai_ws(ws):
                     base64.b64decode(payload["pcm_base64"]), dtype=np.float32
                 ).copy()
 
+                # Dùng frame_index THỰC từ producer (vị trí trong audio gốc) thay vì
+                # tự đếm frame_idx — Kyutai có thể skip frame/xử lý không đều khiến
+                # frame_idx lệch dần khỏi audio thật → subtitle "trôi dần".
+                audio_frame_idx = payload.get("frame_index", frame_idx)
+
                 audio_chunk = torch.from_numpy(pcm).to(kyutai_device, dtype=_model_dtype)[None, None]
                 _t0 = time.time()
                 audio_tokens = kyutai_mimi.encode(audio_chunk)
@@ -423,13 +434,13 @@ def transcribe_kyutai_ws(ws):
                                 word_str = word_str.strip()
                                 if word_str:
                                     now = time.time()
-                                    accumulator.add_word(word_str, frame_idx * 0.08, now)
+                                    accumulator.add_word(word_str, audio_frame_idx * 0.08, now)
                                     try:
                                         with send_lock:
                                             ws.send(json.dumps({
                                                 "type": "word_partial",
                                                 "word": word_str,
-                                                "frame_ts": round(frame_idx * 0.08, 2),
+                                                "frame_ts": round(audio_frame_idx * 0.08, 2),
                                             }))
                                             _last_send_time[0] = time.time()
                                     except Exception as _e:

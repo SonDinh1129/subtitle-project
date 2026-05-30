@@ -68,6 +68,7 @@ export function UploadPage() {
   const [processingMsg, setProcessingMsg] = useState(isVi ? "Đang phân tích âm thanh..." : "Analyzing audio...");
   const [processMode, setProcessMode] = useState<ProcessMode>("normal");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const processingStartRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
   const processingMessages = [
@@ -128,6 +129,7 @@ export function UploadPage() {
       }
 
       setState("processing");
+      processingStartRef.current = Date.now();
 
       const finalJob = await pollUntilDone(
         jobId,
@@ -532,9 +534,20 @@ export function UploadPage() {
                       </motion.p>
                     </AnimatePresence>
                     <p className="text-sm text-gray-400 dark:text-gray-300 mb-4">
-                      {isVi
-                        ? `${Math.round(processingProgress)}% hoàn tất · Dự kiến 1-2 phút`
-                        : `${Math.round(processingProgress)}% complete · Estimated 1-2 minutes`}
+                      {(() => {
+                        const pct = Math.round(processingProgress);
+                        const elapsed = processingStartRef.current ? (Date.now() - processingStartRef.current) / 1000 : 0;
+                        let etaStr = "";
+                        if (pct > 5 && elapsed > 5) {
+                          const totalEst = elapsed / (pct / 100);
+                          const remaining = Math.max(0, totalEst - elapsed);
+                          if (remaining < 60) etaStr = isVi ? `~${Math.round(remaining)}s còn lại` : `~${Math.round(remaining)}s remaining`;
+                          else etaStr = isVi ? `~${Math.round(remaining / 60)}p còn lại` : `~${Math.round(remaining / 60)}m remaining`;
+                        } else {
+                          etaStr = isVi ? "Đang ước tính..." : "Estimating...";
+                        }
+                        return isVi ? `${pct}% hoàn tất · ${etaStr}` : `${pct}% complete · ${etaStr}`;
+                      })()}
                     </p>
 
                     <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden max-w-xs mx-auto">

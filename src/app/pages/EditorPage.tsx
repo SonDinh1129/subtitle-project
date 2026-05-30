@@ -134,30 +134,43 @@ function canBreakBetween(prevWord: string, nextWord: string): boolean {
 }
 
 function getBalancedBreakIndex(words: Word[]): number {
-  if (words.length <= 6) {
+  const MAX_LINE_CHARS = 42;
+  const plain = words.map((w) => w.word);
+  const total = plain.join(" ").length;
+
+  // Một dòng ngắn (≤42) thì không cần xuống dòng.
+  if (words.length <= 6 && total <= MAX_LINE_CHARS) {
     return -1;
   }
 
-  const plain = words.map((w) => w.word);
   let bestBreak = -1;
   let bestScore = Number.POSITIVE_INFINITY;
+  // Ưu tiên break giữ cả 2 dòng ≤42; trong số đó chọn điểm cân bằng nhất.
+  let bestFitBreak = -1;
+  let bestFitScore = Number.POSITIVE_INFINITY;
 
-  for (let i = 2; i <= plain.length - 2; i++) {
+  for (let i = 1; i <= plain.length - 1; i++) {
     const left = plain.slice(0, i).join(" ");
     const right = plain.slice(i).join(" ");
     const score = Math.abs(left.length - right.length);
     const valid = canBreakBetween(plain[i - 1], plain[i]);
+    if (!valid) continue;
 
-    if (valid && score < bestScore) {
+    if (left.length <= MAX_LINE_CHARS && right.length <= MAX_LINE_CHARS) {
+      if (score < bestFitScore) {
+        bestFitScore = score;
+        bestFitBreak = i;
+      }
+    }
+    if (score < bestScore) {
       bestScore = score;
       bestBreak = i;
     }
   }
 
-  if (bestBreak === -1) {
-    return -1;
-  }
-
+  if (bestFitBreak !== -1) return bestFitBreak;
+  // Không có điểm nào giữ được 2 dòng ≤42 (segment dài bất thường) → break cân bằng nhất.
+  if (total <= MAX_LINE_CHARS) return -1;
   return bestBreak;
 }
 
@@ -184,6 +197,14 @@ function buildYouTubeCaptions(words: Word[]): CaptionSegment[] {
   const MAX_WORDS = 22;
   const PAUSE_THRESHOLD = 0.6;
   const EXTEND_SECONDS = 0.25;
+  // Chuẩn phụ đề: ≤42 ký tự/dòng, tối đa 2 dòng → ≤84 ký tự/segment.
+  // ≤17 ký tự/giây (CPS) để người xem kịp đọc.
+  const MAX_LINE_CHARS = 42;
+  const MAX_SEGMENT_CHARS = MAX_LINE_CHARS * 2;
+  const MAX_CPS = 17;
+  const MIN_GAP = 0.05;
+
+  const charLen = (ws: Word[]) => ws.reduce((n, w) => n + w.word.length + 1, 0) - 1;
 
   const result: CaptionSegment[] = [];
   let start = 0;
@@ -197,10 +218,13 @@ function buildYouTubeCaptions(words: Word[]): CaptionSegment[] {
       const count = end - start + 1;
       const duration = current.end - words[start].start;
       const gap = next.start - current.end;
+      // Số ký tự nếu thêm từ kế tiếp — chặn segment vượt 2 dòng.
+      const charsWithNext = charLen(words.slice(start, end + 2));
 
       const forceBreak =
         duration >= MAX_DURATION ||
         count >= MAX_WORDS ||
+        charsWithNext > MAX_SEGMENT_CHARS ||
         gap > PAUSE_THRESHOLD;
 
       const naturalBreak =
@@ -223,12 +247,19 @@ function buildYouTubeCaptions(words: Word[]): CaptionSegment[] {
 
     const segmentWords = words.slice(start, end + 1);
     const nextWord = words[end + 1];
-    const rawEnd = segmentWords[segmentWords.length - 1].end + EXTEND_SECONDS;
-    const cappedEnd = nextWord ? Math.min(rawEnd, nextWord.start - 0.05) : rawEnd;
+    const lastWordEnd = segmentWords[segmentWords.length - 1].end;
+    const segStart = segmentWords[0].start;
+
+    // CPS guard: kéo dài duration để CPS ≤ 17 (nếu có chỗ trống trước từ kế).
+    const chars = charLen(segmentWords);
+    const minDurForCps = chars / MAX_CPS;
+    const desiredEnd = Math.max(lastWordEnd + EXTEND_SECONDS, segStart + minDurForCps);
+    const ceilEnd = nextWord ? nextWord.start - MIN_GAP : desiredEnd;
+    const finalEnd = nextWord ? Math.min(desiredEnd, ceilEnd) : desiredEnd;
 
     result.push({
-      start: segmentWords[0].start,
-      end: Math.max(cappedEnd, segmentWords[segmentWords.length - 1].end),
+      start: segStart,
+      end: Math.max(finalEnd, lastWordEnd),
       words: segmentWords,
       lineBreakIndex: getBalancedBreakIndex(segmentWords),
       text: "",

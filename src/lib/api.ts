@@ -402,23 +402,43 @@ export interface SubtitleItem {
 }
 
 export function wordsToSubtitles(words: Word[], maxChars = 42): SubtitleItem[] {
-  const out: SubtitleItem[] = [];
+  const MAX_CPS = 17;
+  const MIN_GAP = 0.05;
+
+  // Bước 1: gom từ thành block theo giới hạn ký tự.
+  type Block = { startTime: number; endTime: number; text: string };
+  const blocks: Block[] = [];
   let buf: string[] = [], chars = 0, t0: number | null = null;
 
   for (const wd of words) {
     if (t0 === null) t0 = wd.start;
     const wlen = wd.word.length + 1;
     if (chars + wlen > maxChars && buf.length) {
-      out.push({ id: `sub_${out.length}`, startTime: t0!, endTime: wd.start, text: buf.join(" "), selected: false });
+      blocks.push({ startTime: t0!, endTime: wd.start, text: buf.join(" ") });
       buf = [wd.word]; chars = wd.word.length; t0 = wd.start;
     } else {
       buf.push(wd.word); chars += wlen;
     }
   }
   if (buf.length) {
-    out.push({ id: `sub_${out.length}`, startTime: t0!, endTime: words.at(-1)!.end, text: buf.join(" "), selected: false });
+    blocks.push({ startTime: t0!, endTime: words.at(-1)!.end, text: buf.join(" ") });
   }
-  return out;
+
+  // Bước 2: CPS guard — kéo dài duration block quá ngắn để CPS ≤ 17,
+  // nhưng không lấn sang block kế tiếp. Sửa lỗi CPS=1000+ do timestamp sát nhau.
+  return blocks.map((b, i) => {
+    const minDur = b.text.length / MAX_CPS;
+    const next = blocks[i + 1];
+    const ceil = next ? next.startTime - MIN_GAP : Infinity;
+    const endTime = Math.min(Math.max(b.endTime, b.startTime + minDur), ceil);
+    return {
+      id: `sub_${i}`,
+      startTime: b.startTime,
+      endTime: Math.max(endTime, b.endTime),
+      text: b.text,
+      selected: false,
+    };
+  });
 }
 
 // ─── Profile API ─────────────────────────────────────────────────────────────
