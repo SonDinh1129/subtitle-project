@@ -294,6 +294,7 @@ def stream_job_realtime(job_id: str):
 
 
 @subtitle_bp.get("/jobs/<job_id>")
+@limiter.exempt
 @require_auth
 def get_job_status(job_id: str):
     """
