@@ -213,16 +213,20 @@ sequenceDiagram
         Flask-->>FE: 403 { error: "Monthly limit reached" }
         FE-->>User: Thông báo giới hạn + gợi ý upgrade
     else Còn quota
-        Flask->>Pipeline: Tạo job, lưu file, increment_video_count
+        Flask->>Pipeline: Tạo job, lưu file, check_and_increment_video_count (atomic)
         Flask->>Pipeline: Start thread: run_pipeline(job_id)
         Flask-->>FE: 200 { job_id, status: "queued" }
         FE->>FE: setState("processing")
 
         par Pipeline chạy trong background
             Pipeline->>Pipeline: Extract audio → VAD → segment
-            Pipeline->>VM2: POST /transcribe_translate { segments, source_lang }
-            VM2-->>Pipeline: { english_words, vietnamese_words }
-            Pipeline->>Pipeline: Tạo SRT files, cleanup
+            loop Mỗi batch 15 segments (tránh Colab OOM video dài)
+                Pipeline->>VM2: POST /transcribe_translate { segments[batch], source_lang }
+                VM2-->>Pipeline: { english_words, vietnamese_words }
+                Pipeline->>Pipeline: update_job(progress 40→78)
+            end
+            Pipeline->>Pipeline: Tạo SRT, upload lên Supabase Storage
+            Pipeline->>Pipeline: Xóa audio WAV (giữ video cho Editor, cleanup sau 7 ngày)
         and Frontend poll
             loop Mỗi 1.5 giây cho đến khi done/error
                 FE->>Flask: GET /api/jobs/{id} (+ JWT)
@@ -324,7 +328,7 @@ sequenceDiagram
         Pipeline->>VM1: WebSocket connect (24kHz, 80ms/frame)
         loop Mỗi 80ms frame
             Pipeline->>VM1: send { pcm_base64, frame_index }
-            alt Flush khi pause > 1.5s hoặc duration > 8s
+            alt Flush khi silence > 0.7s, duration > 2.5s, hoặc ≥ 70 ký tự
                 VM1->>VM1: Kyutai ASR + VinAI EN→VI translate
                 VM1-->>Pipeline: { english_words, vietnamese_words }
             end
@@ -416,14 +420,14 @@ sequenceDiagram
     FE->>FE: Create <a> href=blobURL download="subtitles_en.srt"
     FE-->>User: Browser tải file SRT
 
-    Note over User,Flask: Option B: Download server-side (file gốc)
+    Note over User,Flask: Option B: Download file gốc (signed URL từ Supabase Storage)
     User->>FE: Click "Download SRT gốc"
-    FE->>Flask: GET /api/jobs/{id}/download/en (+ JWT)
+    FE->>Flask: GET /api/jobs/{id}/srt-url?lang=en (+ JWT)
     Flask->>Flask: require_auth, verify ownership
-    Flask->>Flask: Check job.status === "done"
-    Flask->>Flask: Read SRT file từ outputs/
-    Flask-->>FE: send_file(subtitles_en.srt)
-    FE-->>User: Browser tải file SRT
+    Flask->>Flask: Lấy en_srt_storage_path từ job
+    Flask->>Flask: signed_url(storage_path) — Supabase Storage, TTL 3600s
+    Flask-->>FE: 200 { url, expires_in: 3600 }
+    FE-->>User: Browser tải file SRT từ signed URL
 ```
 
 ---
@@ -711,7 +715,7 @@ sequenceDiagram
         VM1->>Kyutai: lm.step(audio_tokens) → text_token
         alt text_token > 0 (có nội dung)
             VM1->>VM1: decode token → detect word boundary
-            alt Accumulated words → flush (pause > 1.5s hoặc duration > 8s)
+            alt Accumulated words → flush (silence > 0.7s, duration > 2.5s, hoặc ≥ 70 ký tự)
                 VM1->>VinAI: translate_en2vi_batch([en_text])
                 VinAI-->>VM1: vietnamese_text
                 VM1->>VM1: align_translation_to_words()
@@ -815,7 +819,8 @@ flowchart TB
     end
 
     subgraph External ["External Systems"]
-        SB[(Supabase<br/>Auth + DB)]
+        SB[(Supabase<br/>Auth + DB + Storage)]
+        SBS[(Supabase Storage<br/>bucket: subtitle-files<br/>SRT signed URLs)]
         MoMo[MoMo<br/>Payment Gateway]
         ColabVM2[Colab VM2 — COLAB_URL<br/>Faster-Whisper + PhoWhisper + VinAI<br/>HTTP /transcribe_translate<br/>WS /ws/transcribe_vi_realtime]
         ColabVM1[Colab VM1 — COLAB_REALTIME_URL<br/>Kyutai stt-1b-en_fr + VinAI<br/>WS /ws/transcribe_kyutai]
@@ -843,11 +848,13 @@ flowchart TB
     SM --> UPL
     SM --> OUT
     SM --> JOBS
+    SM -->|Upload SRT| SBS
 
     UP -->|Poll GET /jobs| SC
     UP --> ED
     ED -->|SSE /jobs/stream| SC
-    ED -->|GET /download| SC
+    ED -->|GET /jobs/id/srt-url → signed URL| SC
+    SC -->|signed_url| SBS
     ED -->|POST /export| SC
     SC -->|FFmpeg burn| FF
 

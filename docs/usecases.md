@@ -82,8 +82,8 @@ Guest → Đăng ký/Đăng nhập → Free User
 
 | # | Use Case | Mô tả |
 |---|----------|-------|
-| UC-26 | Tải file SRT tiếng Anh | Download subtitles_en.srt |
-| UC-27 | Tải file SRT tiếng Việt | Download subtitles_vi.srt |
+| UC-26 | Tải file SRT tiếng Anh | Download EN: client-side từ subtitle đã sửa, hoặc signed URL `/jobs/<id>/srt-url?lang=en` (Supabase Storage) |
+| UC-27 | Tải file SRT tiếng Việt | Download VI: client-side hoặc signed URL `/jobs/<id>/srt-url?lang=vi` |
 | UC-28 | Export video burned subtitle | Chọn ngôn ngữ + resolution (360p/720p/1080p) → POST /export → 202 + polling → tải video với subtitle đã burn |
 | UC-41 | Đánh giá chất lượng bản dịch | GET /api/jobs/:id/translation-quality → gửi toàn bộ cặp EN/VI lên ChatGPT → trả điểm trung bình + chi tiết từng cặp (LLM-as-judge) |
 
@@ -102,7 +102,7 @@ Guest → Đăng ký/Đăng nhập → Free User
 | # | Use Case | Mô tả |
 |---|----------|-------|
 | UC-32 | Chọn chế độ Realtime | Chọn realtime + source_lang → upload → redirect ngay sang Editor |
-| UC-33 | Xem subtitle realtime | Subtitle hiện dần qua SSE; backend stream PCM frames tới Colab WebSocket (EN: VM1 `/ws/transcribe_kyutai` 80ms/24kHz, VI: VM2 `/ws/transcribe_vi_realtime` 32ms/16kHz) |
+| UC-33 | Xem subtitle realtime | Subtitle hiện dần qua SSE; backend stream PCM frames tới Colab WebSocket (EN: VM1 `/ws/transcribe_kyutai` 80ms/24kHz, VI: VM2 `/ws/transcribe_vi_realtime` 32ms/16kHz). Realtime chỉ dùng **sentence mode** (progressive bị ẩn); overlay chuyển time-based khi user tua về quá khứ |
 | UC-34 | Upload không giới hạn | Không bị chặn sau 5 video/tháng |
 | UC-35 | Xem badge Premium | Crown icon trên Header, badge trên profile |
 

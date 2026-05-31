@@ -119,8 +119,8 @@
 | **Mô tả** | User upload video, hệ thống stream kết quả phiên âm theo từng đoạn realtime qua SSE |
 | **Tiền điều kiện** | User là Premium; đã đăng nhập |
 | **Hậu điều kiện** | Subtitle được tạo từng phần realtime; user chuyển vào Editor khi hoàn tất |
-| **Luồng chính** | 1. User chọn file video<br>2. Chọn ngôn ngữ (EN hoặc VI) và chế độ Realtime<br>3. Hệ thống upload, tạo job<br>4. Kết nối SSE stream từ backend<br>5. Colab VM1 (EN) hoặc VM2 (VI) xử lý và stream kết quả từng chunk<br>6. Frontend hiển thị subtitle tích luỹ realtime<br>7. Stream kết thúc → chuyển vào Editor |
-| **Luồng ngoại lệ** | 2a. User không phải Premium → UC-14 extend (bị chặn)<br>5a. Mất kết nối SSE → hiện lỗi, cho phép reconnect |
+| **Luồng chính** | 1. User chọn file video<br>2. Chọn ngôn ngữ (EN hoặc VI) và chế độ Realtime<br>3. Hệ thống upload, tạo job, redirect ngay vào Editor (warmup 2.5s)<br>4. Kết nối SSE stream từ backend (token 60s)<br>5. Colab VM1 (EN) hoặc VM2 (VI) xử lý và stream kết quả từng segment<br>6. Frontend hiển thị subtitle tích luỹ realtime (chỉ **sentence mode**)<br>7. Stream kết thúc → SRT upload Supabase Storage, status=done |
+| **Luồng ngoại lệ** | 2a. User không phải Premium → UC-14 extend (bị chặn)<br>5a. Mất kết nối SSE → hiện lỗi, cho phép reconnect<br>5b. Pipeline lỗi (video_path mất, Colab down) → status=error, hiện thông báo |
 | **Quan hệ** | `<<include>>` UC-11<br>`<<extend>>` UC-12 (mở rộng từ Normal flow)<br>`<<uses>>` Colab VM1 (EN), Colab VM2 (VI) |
 
 ---
@@ -177,10 +177,10 @@
 | **Mã UC** | UC-26/27 |
 | **Tên** | Tải file subtitle định dạng SRT |
 | **Actor** | Free User |
-| **Mô tả** | User tải file .srt của subtitle đã chỉnh sửa về máy |
+| **Mô tả** | User tải file .srt của subtitle về máy. Có 2 cách: (A) tạo client-side từ subtitle đã chỉnh sửa, (B) tải bản gốc qua signed URL từ Supabase Storage |
 | **Tiền điều kiện** | UC-17 đang active; job đã có kết quả subtitle |
 | **Hậu điều kiện** | File .srt được tải về máy user |
-| **Luồng chính** | 1. User nhấn "Download SRT" trong Editor<br>2. Hệ thống tạo file .srt từ dữ liệu subtitle hiện tại<br>3. Trình duyệt tải file về máy |
+| **Luồng chính** | 1. User nhấn "Download SRT" trong Editor<br>2A. (Client-side) Hệ thống build .srt từ subtitle state hiện tại → Blob → tải về<br>2B. (Server-side) `GET /api/jobs/<id>/srt-url?lang=en\|vi` → backend trả signed URL (TTL 3600s) từ bucket `subtitle-files`<br>3. Trình duyệt tải file về máy |
 | **Quan hệ** | `<<include>>` UC-17 |
 
 ---

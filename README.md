@@ -184,17 +184,24 @@ created        cache               to SSE queue
         │
         ├── 3d. Encode each segment to base64 PCM
         │
-        ├── 3e. HTTP POST to Colab /transcribe_translate
-        │         ← Whisper ASR (EN)
+        ├── 3e. HTTP POST to Colab /transcribe_translate THEO BATCH 15 segments
+        │         (transcribe_translate_batched — tránh Colab OOM với video dài)
+        │         ← Whisper ASR (EN) / PhoWhisper (VI)
         │         ← VinAI Translation (EN→VI)
-        │         Response: word-level timestamps EN + VI
+        │         Response mỗi batch: word-level timestamps EN + VI
+        │         update_job progress 40 → 78 theo từng batch
         │
         ├── 3f. words_to_srt_string() — tạo SRT từ word timestamps
         │
-        └── 3g. Save outputs/{job_id}_en.srt, outputs/{job_id}_vi.srt
+        ├── 3g. Upload SRT lên Supabase Storage (bucket: subtitle-files)
+        │         key: {user_id}/{job_id}/en.srt và vi.srt
+        │         Lưu en_srt_storage_path / vi_srt_storage_path vào job
+        │
+        └── 3h. Xóa audio WAV; GIỮ video cho Editor playback
+                 (cleanup daemon xóa uploads/ + outputs/ sau 7 ngày)
                  Update job status = "done"
 
-4. Frontend polls /api/jobs/<id> → downloads SRT
+4. Frontend polls /api/jobs/<id> → lấy signed URL từ /jobs/<id>/srt-url
 ```
 
 ### 3.2 Realtime Mode — Tổng quan luồng dữ liệu
@@ -450,12 +457,15 @@ for event in client.stream(producer):
                 "vietnamese_words": event["vietnamese_words"],
             })
 
-# Sau khi stream kết thúc: generate SRT
+# Sau khi stream kết thúc: generate SRT + upload Supabase Storage
 en_srt = words_to_srt_string(english_words)
 vi_srt = words_to_srt_string(vietnamese_words)
 save_srt(en_srt, f"outputs/{job_id}_en.srt")
 save_srt(vi_srt, f"outputs/{job_id}_vi.srt")
-update_job(job_id, status=DONE, progress=100)
+upload_file(en_srt_path, f"{user_id}/{job_id}/en.srt")   # Supabase Storage bucket subtitle-files
+upload_file(vi_srt_path, f"{user_id}/{job_id}/vi.srt")
+update_job(job_id, status=DONE, progress=100,
+           en_srt_storage_path=..., vi_srt_storage_path=...)
 emit_job_event(job_id, {"type": "done", "progress": 100})
 ```
 
@@ -635,19 +645,29 @@ onEvent: (evt) => {
 
 **Subtitle display logic (live vs. time-based):**
 
+Realtime pipeline xử lý nhanh hơn realtime (~2-3x), nên khi video phát ở giây 9
+thì pipeline đã nhận dạng tới giây 27. Overlay chỉ hiển thị segment-mới-nhất khi
+playhead **bám mép live**; khi user tua/scrub về quá khứ → chuyển sang time-based
+lookup để subtitle khớp đúng vị trí video.
+
 ```typescript
-const isLiveStreaming = isRealtimeMode && streamStatus === "streaming" && isPlaying;
+// lastStreamedEnd = end time của từ cuối cùng đã nhận
+const atLiveEdge = currentTime >= lastStreamedEnd - 1.0;
+const isLiveStreaming =
+  isRealtimeMode && streamStatus === "streaming" && isPlaying
+  && !isScrubbing && atLiveEdge;
 
 // Live mode: ưu tiên partial words, fallback về segment cuối
 const textEnLive = isLiveStreaming
   ? (inProgressWords.length > 0
       ? inProgressWords.join(" ")           // đang nhận dạng
       : (latestRealtimeSegment?.en ?? ""))  // segment vừa xong
-  : textEn;  // normal mode: lookup theo currentTime
+  : textEn;  // time-based: lookup theo currentTime
 
-const textViLive = isLiveStreaming
-  ? (latestRealtimeSegment?.vi ?? "")
-  : textVi;
+const textViLive = isLiveStreaming ? (latestRealtimeSegment?.vi ?? "") : textVi;
+
+// Overlay wrap: mỗi dòng ≤ 42 ký tự, tối đa 2 dòng (wrapToTwoLines)
+// chỉ realtime → sentence mode (progressive bị ẩn ở realtime)
 ```
 
 **Auto-clear partial words (3s timeout):**
@@ -929,24 +949,24 @@ Với mỗi cặp block liên tiếp:
             → Inline CPL fix (wrap_text)
 ```
 
-### 4.3 Frontend Line Breaking — Balanced Display
+### 4.3 Frontend Line Breaking & CPS/CPL Guard
 
-**Vị trí:** `src/app/pages/EditorPage.tsx`
+**Vị trí:** `src/app/pages/EditorPage.tsx` + `src/lib/api.ts`
 
-Frontend có thêm thuật toán line-break riêng để hiển thị phụ đề song ngữ (EN + VI) đẹp hơn:
+Frontend áp ràng buộc CPL/CPS riêng để hiển thị phụ đề (đặc biệt VI sau dịch dễ vượt chuẩn):
 
 ```
-getBalancedBreakIndex(words):
-    Điều kiện bỏ qua break (ngữ pháp):
-        Articles: "a", "an", "the" → không break trước object
-        Auxiliaries: "is", "are", "was", ... → không break trước verb
-        Prepositions: "in", "on", "at", ... → không break trước object
+getBalancedBreakIndex(words):  — điểm xuống dòng cho overlay
+    Bỏ qua break sai ngữ pháp (Articles/Auxiliaries/Prepositions)
+    Ưu tiên điểm chia giữ CẢ 2 DÒNG ≤ 42 ký tự; trong đó chọn cân bằng nhất
 
-    Thuật toán:
-        Duyệt từng vị trí break i = 2..n-2
-        score = |len(left_part) - len(right_part)|
-        canBreak = !ARTICLES.has(prev) && !AUXILIARIES.has(prev) && !PREPOSITIONS.has(prev)
-        Chọn vị trí có score nhỏ nhất và canBreak = true
+wrapToTwoLines(text, 42):  — wrap chuỗi overlay live thành tối đa 2 dòng ≤42 ký tự
+    Áp dụng cho cả textEnLive và textViLive trước khi render overlay
+
+wordsToSubtitles(words, 42)  [api.ts]:  — list subtitle bên phải + SRT
+    Bước 1: gom từ thành block ≤ 42 ký tự
+    Bước 2: CPS guard — kéo dài duration block quá ngắn để CPS ≤ 17,
+            không lấn block kế (sửa lỗi CPS=1000+ do timestamp sát nhau)
 ```
 
 ---
@@ -1091,12 +1111,10 @@ ffmpeg -i input.mp4 \
   -ar 16000 \          # 16 kHz
   output.wav
 
-# Realtime mode: extract theo chunks 5 giây
-ffmpeg -i input.mp4 \
-  -f segment \
-  -segment_time 5 \
-  -acodec pcm_s16le -ac 1 -ar 16000 \
-  chunks/chunk_%04d.wav
+# Realtime mode: stream PCM frames trực tiếp từ FFmpeg stdout (không cắt chunk file)
+# AudioStreamProducer đọc raw float32 PCM, throttle theo realtime, gửi từng frame qua WebSocket
+ffmpeg -i input.mp4 -vn -ar 24000 -ac 1 -f f32le pipe:1   # EN (Kyutai): 24kHz, 80ms/frame
+ffmpeg -i input.mp4 -vn -ar 16000 -ac 1 -f f32le pipe:1   # VI: 16kHz, 32ms/frame
 ```
 
 ### 6.2 VAD Segmentation
@@ -1144,12 +1162,13 @@ split_long_segment(max_duration=25.0s):
 ### 7.2 Luồng dịch thuật
 
 ```
-1. Whisper ASR → English word-level timestamps
-2. Gộp từ thành text theo segment
+1. Whisper/PhoWhisper ASR → word-level timestamps
+2. Gộp từ thành text theo segment (gửi Colab theo batch 15 segments)
 3. VinAI model dịch EN → VI
 4. Word-level timestamps VI được align lại
-5. words_to_srt_string() tạo VI SRT riêng
-6. subtitle_optimizer.py optimize VI SRT (MAX_CPL=47)
+5. words_to_srt_string() tạo VI SRT riêng (có CPS guard ở frontend)
+6. Upload SRT lên Supabase Storage
+7. (Premium) subtitle_optimizer.py optimize VI SRT (MAX_CPL=47)
 ```
 
 ---
@@ -1189,12 +1208,12 @@ src/app/pages/
 | Hàm | Mô tả |
 |-----|-------|
 | `uploadVideo(file, mode, translationMode, onProgress, sourceLang)` | XHR upload với progress tracking |
-| `getJobStatus(jobId)` | Poll trạng thái job |
+| `getJobStatus(jobId)` | Poll trạng thái job (rate-limit exempt) |
 | `pollUntilDone(jobId)` | Wait until job completion |
 | `openRealtimeStream(jobId, handlers)` | SSE stream cho realtime mode |
-| `wordsToSubtitles(words)` | Chuyển word array → subtitle items |
-| `exportVideo(jobId, lang)` | Burn subtitles vào video |
-| `downloadSrt(jobId, lang)` | Tải file SRT |
+| `wordsToSubtitles(words)` | Chuyển word array → subtitle items (CPS guard ≤17) |
+| `getSrtUrl(jobId, lang)` | Lấy signed URL tải SRT từ Supabase Storage |
+| `exportVideo(jobId, resolution, lang)` | Burn subtitles vào video (async) |
 
 ---
 
@@ -1232,9 +1251,12 @@ Colab timeout = 600s (10 phút)
 | POST | `/api/upload` | Upload video, tạo job | Required |
 | GET | `/api/jobs/<id>` | Poll job status | Required |
 | GET | `/api/jobs/<id>/stream` | SSE realtime stream | Required |
-| GET | `/api/jobs/<id>/download/<lang>` | Tải SRT (en/vi) | Required |
-| POST | `/api/export` | Burn subtitles vào video | Required |
+| GET | `/api/jobs/<id>/srt-url?lang=en\|vi` | Signed URL tải SRT từ Supabase Storage (TTL 3600s) | Required |
+| POST | `/api/export` | Burn subtitles vào video (async, trả 202) | Required |
+| GET | `/api/export-status/<export_id>` | Poll trạng thái export | Required |
 | POST | `/api/jobs/<id>/optimize` | Optimize VI subtitles | Premium |
+| GET | `/api/jobs/<id>/report?lang=en\|vi` | Quality report (CPS/CPL/gap/repetition) | Required |
+| GET | `/api/jobs/<id>/translation-quality` | LLM-as-judge đánh giá bản dịch | Required |
 
 ### Upload Request
 
@@ -1335,7 +1357,8 @@ python app.py
 | Metric | Giá trị | Ghi chú |
 |--------|---------|---------|
 | Max upload size | 2 GB | Flask limit |
-| Realtime chunk size | 5 giây | FFmpeg segmentation |
+| Normal batch size | 15 segments/request | Tránh Colab OOM video dài |
+| Realtime frame (EN/VI) | 80ms @ 24kHz / 32ms @ 16kHz | Kyutai / PhoWhisper |
 | Realtime latency | 1-2 giây | Frame-based WS streaming |
 | VAD latency | ~50ms/1s audio | CPU-bound |
 | Colab timeout | 600 giây | 10-phút patience |
