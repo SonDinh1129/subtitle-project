@@ -463,8 +463,8 @@ def transcribe_kyutai_ws(ws):
                 if frame_idx - _last_stats_frame >= 50:
                     _avg_ms = (_total_infer_time / 50) * 1000
                     logger.info(
-                        f"📊 frames={frame_idx} audio_frame_idx={audio_frame_idx} "
-                        f"audio_ts={audio_frame_idx*0.08:.1f}s tokens_detected={_nonzero_tokens} "
+                        f"📊 frames={frame_idx} audio_ts={audio_frame_idx*0.08:.1f}s "
+                        f"tokens_detected={_nonzero_tokens} "
                         f"avg_infer={_avg_ms:.1f}ms/frame (target <80ms for realtime)"
                     )
                     _total_infer_time = 0.0

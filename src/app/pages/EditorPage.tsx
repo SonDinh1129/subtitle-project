@@ -420,6 +420,8 @@ export function EditorPage() {
     const modeInSession = sessionStorage.getItem("subtitleProcessMode");
     const realtime = modeInUrl === "realtime" || modeInSession === "realtime";
     setIsRealtimeMode(realtime);
+    // Realtime chỉ hỗ trợ sentence mode — progressive không ổn với streaming.
+    if (realtime) setSubtitleMode("sentence");
 
     const blobUrl = sessionStorage.getItem("videoPreviewUrl");
     const serverFilename = sessionStorage.getItem("videoServerFilename");
@@ -933,24 +935,27 @@ export function EditorPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 p-1 rounded-lg bg-gray-800 border border-gray-700">
-            <button
-              onClick={() => setSubtitleMode("sentence")}
-              className={`px-2.5 py-1 text-xs rounded-md transition-all ${
-                subtitleMode === "sentence" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Sentence
-            </button>
-            <button
-              onClick={() => setSubtitleMode("progressive")}
-              className={`px-2.5 py-1 text-xs rounded-md transition-all ${
-                subtitleMode === "progressive" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Progressive
-            </button>
-          </div>
+          {/* Realtime chỉ dùng sentence mode → ẩn toggle; normal cho chọn cả hai. */}
+          {!isRealtimeMode && (
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-gray-800 border border-gray-700">
+              <button
+                onClick={() => setSubtitleMode("sentence")}
+                className={`px-2.5 py-1 text-xs rounded-md transition-all ${
+                  subtitleMode === "sentence" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Sentence
+              </button>
+              <button
+                onClick={() => setSubtitleMode("progressive")}
+                className={`px-2.5 py-1 text-xs rounded-md transition-all ${
+                  subtitleMode === "progressive" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Progressive
+              </button>
+            </div>
+          )}
 
           <button
             onClick={handleUndo}
