@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import { motion } from "motion/react";
 import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2, Mail, RefreshCw } from "lucide-react";
 import { AuthRightPanel } from "../components/AuthRightPanel";
 import { useUiPreferences } from "../context/UiPreferencesContext";
 import { supabase, signInWithGoogle } from "../../lib/supabase";
+
+const EMAIL_REDIRECT_TO = `${window.location.origin}/auth/callback`;
 
 function GoogleIcon() {
   return (
@@ -62,24 +64,24 @@ function PasswordStrength({ password, isVi }: { password: string; isVi: boolean 
 export function SignUpPage() {
   const { language } = useUiPreferences();
   const isVi = language === "vi";
-  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
-  const [step, setStep] = useState<'form' | 'otp'>('form');
-  const [otp, setOtp] = useState("");
-  const [otpError, setOtpError] = useState<string | null>(null);
-  const [otpLoading, setOtpLoading] = useState(false);
+  const [step, setStep] = useState<'form' | 'check-email'>('form');
+  const [resendError, setResendError] = useState<string | null>(null);
   const [resendCountdown, setResendCountdown] = useState(0);
   const [errors, setErrors] = useState<{
     fullName?: string;
     email?: string;
     password?: string;
+    confirmPassword?: string;
   }>({});
 
   const resendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -97,6 +99,8 @@ export function SignUpPage() {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = isVi ? "Vui lòng nhập địa chỉ email hợp lệ" : "Enter a valid email address";
     if (!password) e.password = isVi ? "Mật khẩu là bắt buộc" : "Password is required";
     else if (password.length < 8) e.password = isVi ? "Mật khẩu phải có ít nhất 8 ký tự" : "Password must be at least 8 characters";
+    if (!confirmPassword) e.confirmPassword = isVi ? "Vui lòng xác nhận mật khẩu" : "Please confirm your password";
+    else if (confirmPassword !== password) e.confirmPassword = isVi ? "Mật khẩu xác nhận không khớp" : "Passwords do not match";
     return e;
   };
 
@@ -124,34 +128,17 @@ export function SignUpPage() {
     }, 1000);
   };
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!otp.trim()) {
-      setOtpError(isVi ? "Vui lòng nhập mã OTP" : "Please enter the OTP code");
-      return;
-    }
-    setOtpError(null);
-    setOtpLoading(true);
-    try {
-      const { error } = await supabase.auth.verifyOtp({ email, token: otp, type: 'signup' });
-      if (error) {
-        setOtpError(isVi ? "Mã OTP không hợp lệ hoặc đã hết hạn." : "Invalid or expired OTP code.");
-      } else {
-        navigate("/upload", { replace: true });
-      }
-    } catch {
-      setOtpError(isVi ? "Đã xảy ra lỗi, vui lòng thử lại." : "An error occurred, please try again.");
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
   const handleResendSignup = async () => {
     if (resendCountdown > 0) return;
+    setResendError(null);
     try {
-      const { error } = await supabase.auth.resend({ type: 'signup', email });
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: { emailRedirectTo: EMAIL_REDIRECT_TO },
+      });
       if (error && error.status === 429) {
-        setOtpError(isVi ? "Quá nhiều yêu cầu, vui lòng thử lại sau." : "Too many requests, please try again later.");
+        setResendError(isVi ? "Quá nhiều yêu cầu, vui lòng thử lại sau." : "Too many requests, please try again later.");
         return;
       }
       startResendCountdown();
@@ -174,7 +161,10 @@ export function SignUpPage() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { full_name: fullName } },
+        options: {
+          data: { full_name: fullName },
+          emailRedirectTo: EMAIL_REDIRECT_TO,
+        },
       });
       if (error) {
         if (error.status === 429) {
@@ -185,7 +175,7 @@ export function SignUpPage() {
       } else if (data.user && data.user.identities && data.user.identities.length === 0) {
         setAuthError(isVi ? "Email này đã được đăng ký. Vui lòng đăng nhập." : "This email is already registered. Please sign in.");
       } else {
-        setStep('otp');
+        setStep('check-email');
         startResendCountdown();
       }
     } catch {
@@ -195,7 +185,7 @@ export function SignUpPage() {
     }
   };
 
-  if (step === 'otp') {
+  if (step === 'check-email') {
     return (
       <div className="min-h-screen flex bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
         <div className="flex-1 flex flex-col justify-center items-center px-6 py-12 lg:max-w-[52%]">
@@ -214,79 +204,42 @@ export function SignUpPage() {
                 <Mail className="w-6 h-6 text-violet-600" />
               </div>
               <h1 className="text-gray-900 dark:text-gray-100 mb-1.5" style={{ fontSize: "1.625rem", fontWeight: 700, lineHeight: 1.25 }}>
-                {isVi ? "Xác minh email" : "Verify your email"}
+                {isVi ? "Kiểm tra email của bạn" : "Check your email"}
               </h1>
               <p className="text-gray-500 mb-2" style={{ fontSize: "0.9375rem" }}>
-                {isVi ? "Chúng tôi đã gửi mã 6 số đến" : "We sent a 6-digit code to"}
+                {isVi ? "Chúng tôi đã gửi một liên kết đăng nhập đến" : "We sent a magic sign-in link to"}
               </p>
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-100 mb-6">
                 <Mail className="w-4 h-4 text-violet-500" />
                 <span className="text-violet-700" style={{ fontSize: "0.9375rem", fontWeight: 600 }}>{email}</span>
               </div>
+              <p className="text-gray-500 mb-6" style={{ fontSize: "0.9375rem", lineHeight: 1.6 }}>
+                {isVi
+                  ? "Nhấp vào liên kết trong hộp thư của bạn để xác nhận tài khoản và tiếp tục. Nếu không thấy email, hãy kiểm tra thư mục Spam."
+                  : "Click the link in your inbox to confirm your account and continue. If you don't see it, check your Spam folder."}
+              </p>
 
-              <form onSubmit={handleVerifyOtp} className="space-y-4">
-                <div>
-                  <label className="block text-gray-700 mb-1.5" style={{ fontSize: "0.875rem", fontWeight: 500 }}>
-                    {isVi ? "Mã xác minh" : "Verification Code"}
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    placeholder="123456"
-                    value={otp}
-                    onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '')); setOtpError(null); }}
-                    className={`w-full px-4 py-2.5 rounded-xl border bg-white text-gray-900 placeholder-gray-400 outline-none transition-all tracking-widest text-center text-lg
-                      ${otpError
-                        ? "border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100"
-                        : "border-gray-200 hover:border-gray-300 focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
-                      }`}
-                  />
-                  {otpError && <p className="mt-1.5 text-red-500" style={{ fontSize: "0.8125rem" }}>{otpError}</p>}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={otpLoading}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-violet-200"
-                  style={{ fontSize: "0.9375rem", fontWeight: 600 }}
-                >
-                  {otpLoading ? (
-                    <>
-                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      {isVi ? "Đang xác minh..." : "Verifying..."}
-                    </>
-                  ) : (
-                    <>
-                      {isVi ? "Xác minh" : "Verify"}
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </form>
+              {resendError && (
+                <p className="mb-3 text-red-500" style={{ fontSize: "0.8125rem" }}>{resendError}</p>
+              )}
 
               <button
                 onClick={handleResendSignup}
                 disabled={resendCountdown > 0}
-                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 style={{ fontSize: "0.9375rem", fontWeight: 500 }}
               >
                 <RefreshCw className="w-4 h-4" />
                 {resendCountdown > 0
                   ? (isVi ? `Gửi lại sau ${resendCountdown}s` : `Resend in ${resendCountdown}s`)
-                  : (isVi ? "Gửi lại mã" : "Resend code")}
+                  : (isVi ? "Gửi lại liên kết" : "Resend link")}
               </button>
 
               <p className="mt-6 text-center text-gray-500" style={{ fontSize: "0.875rem" }}>
                 <button onClick={() => {
                   if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
                   setStep('form');
-                  setOtp('');
-                  setOtpError(null);
-                  setOtpLoading(false);
+                  setResendError(null);
                   setResendCountdown(0);
                 }} className="text-violet-600 hover:text-violet-700 font-semibold">
                   {isVi ? "← Dùng email khác" : "← Use different email"}
@@ -485,6 +438,38 @@ export function SignUpPage() {
               <PasswordStrength password={password} isVi={isVi} />
               {errors.password && (
                 <p className="mt-1.5 text-red-500" style={{ fontSize: "0.8125rem" }}>{errors.password}</p>
+              )}
+            </div>
+
+            {/* Confirm Password */}
+            <div>
+              <label className="block text-gray-700 mb-1.5" style={{ fontSize: "0.875rem", fontWeight: 500 }}>
+                {isVi ? "Xác nhận mật khẩu" : "Confirm Password"}
+              </label>
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  placeholder={isVi ? "Nhập lại mật khẩu" : "Re-enter password"}
+                  value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setErrors((p) => ({ ...p, confirmPassword: undefined })); }}
+                  className={`w-full px-4 py-2.5 pr-12 rounded-xl border bg-white text-gray-900 placeholder-gray-400 outline-none transition-all
+                    ${errors.confirmPassword
+                      ? "border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                      : "border-gray-200 hover:border-gray-300 focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+                    }`}
+                  style={{ fontSize: "0.9375rem" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-0.5"
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                </button>
+              </div>
+              {errors.confirmPassword && (
+                <p className="mt-1.5 text-red-500" style={{ fontSize: "0.8125rem" }}>{errors.confirmPassword}</p>
               )}
             </div>
 
