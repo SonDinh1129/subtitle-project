@@ -14,7 +14,7 @@ from typing import Optional
 
 from supabase import create_client, Client
 
-BUCKET = "subtitle-files"
+BUCKET = "subtitle-file"
 
 # ── Singleton Supabase client ─────────────────────────────────────
 _supabase_client: Optional[Client] = None
