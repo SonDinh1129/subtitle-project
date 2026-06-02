@@ -31,6 +31,7 @@ Nền tảng SaaS tạo phụ đề tự động từ video, hỗ trợ tiếng 
 11. [Thanh toán & Tính năng Premium](#11-thanh-toán--tính-năng-premium)
 12. [Cài đặt & Chạy](#12-cài-đặt--chạy)
 13. [Quality Report — Đo chỉ số phụ đề](#13-quality-report--đo-chỉ-số-phụ-đề)
+14. [Tài liệu & Kiểm thử](#14-tài-liệu--kiểm-thử)
 
 ---
 
@@ -41,7 +42,7 @@ subtitle-project/
 ├── app.py                          ← Entry point: Flask app factory, load VAD, đăng ký blueprint
 ├── controllers/
 │   ├── subtitle_controller.py      ← Routes chính: upload, stream SSE, export, optimize
-│   ├── auth_controller.py          ← Authentication: signup, login, profile
+│   ├── auth_controller.py          ← Account: /me, profile, change-password, delete account (signup/login do qua Supabase client)
 │   └── payment_controller.py       ← MoMo payment integration
 ├── models/
 │   ├── subtitle_model.py           ← Business logic: VAD, Colab client, SRT gen, job store
@@ -122,7 +123,7 @@ subtitle-project/
 
 ┌─────────────────────────────────────┐
 │       Supabase (Auth, DB)           │
-│  Auth: Email/Password, Google OAuth │
+│  Auth: Magic Link, Password, OAuth  │
 │  Profiles: subscription, usage      │
 └─────────────────────────────────────┘
 ```
@@ -131,11 +132,15 @@ subtitle-project/
 
 | Cơ chế | Chi tiết |
 |--------|---------|
-| Frontend auth | Supabase Auth (email/password, Google OAuth) |
+| Đăng ký | Email + mật khẩu, xác nhận tài khoản qua **Magic Link** (`signUp` + `emailRedirectTo=/auth/callback`) — mật khẩu được lưu nên người dùng đăng nhập lại bằng mật khẩu sau khi xác nhận |
+| Đăng nhập | Email/mật khẩu (`signInWithPassword`) hoặc **Google OAuth** |
+| Quên mật khẩu | Xác thực **OTP 6 số** gửi về email (`resetPasswordForEmail` → `verifyOtp` → `updateUser`) |
 | Backend validation | JWT HS256 verify với `SUPABASE_JWT_SECRET` |
-| Route protection | `@require_auth` decorator |
+| Route protection | Frontend: `ProtectedRoute` (`/upload`, `/editor`, `/upgrade`, `/profile`) · Backend: `@require_auth` decorator |
 | Premium gates | `@require_premium` kiểm tra `profile.premium_until > now()` |
-| Rate limiting | Flask-Limiter: 5 uploads/phút per IP |
+| Rate limiting | Flask-Limiter: 5 uploads/phút; 3 tạo đơn thanh toán/phút |
+
+> Cấu hình Supabase: bật **Confirm email**, template **Confirm signup** dùng `{{ .ConfirmationURL }}`, và thêm `http://localhost:5173/auth/callback` vào Redirect URLs (xem [docs/sequence.md](docs/sequence.md) — biểu đồ tuần tự luồng xác thực).
 
 ### 2.3 Job State Management
 
@@ -193,7 +198,7 @@ created        cache               to SSE queue
         │
         ├── 3f. words_to_srt_string() — tạo SRT từ word timestamps
         │
-        ├── 3g. Upload SRT lên Supabase Storage (bucket: subtitle-files)
+        ├── 3g. Upload SRT lên Supabase Storage (bucket: subtitle-file)
         │         key: {user_id}/{job_id}/en.srt và vi.srt
         │         Lưu en_srt_storage_path / vi_srt_storage_path vào job
         │
@@ -462,7 +467,7 @@ en_srt = words_to_srt_string(english_words)
 vi_srt = words_to_srt_string(vietnamese_words)
 save_srt(en_srt, f"outputs/{job_id}_en.srt")
 save_srt(vi_srt, f"outputs/{job_id}_vi.srt")
-upload_file(en_srt_path, f"{user_id}/{job_id}/en.srt")   # Supabase Storage bucket subtitle-files
+upload_file(en_srt_path, f"{user_id}/{job_id}/en.srt")   # Supabase Storage bucket subtitle-file
 upload_file(vi_srt_path, f"{user_id}/{job_id}/vi.srt")
 update_job(job_id, status=DONE, progress=100,
            en_srt_storage_path=..., vi_srt_storage_path=...)
@@ -1196,24 +1201,32 @@ src/app/pages/
 ├── UploadPage.tsx           ← Upload video, theo dõi tiến trình
 ├── EditorPage.tsx           ← Subtitle editor, preview, export
 │     └── getBalancedBreakIndex()  ← Thuật toán line-break frontend
-├── SignInPage.tsx            ← Login
-├── SignUpPage.tsx            ← Registration
-├── ProfilePage.tsx          ← Profile, settings
-├── UpgradePage.tsx          ← Premium tier info
-└── UpgradeSuccessPage.tsx   ← Payment confirmation
+├── SignInPage.tsx           ← Đăng nhập (email/mật khẩu + Google)
+├── SignUpPage.tsx           ← Đăng ký (Magic Link, có xác nhận mật khẩu)
+├── ForgotPasswordPage.tsx   ← Quên mật khẩu (OTP 6 số)
+├── AuthCallbackPage.tsx     ← Xử lý callback Magic Link / OAuth → /auth/callback
+├── ResetPasswordPage.tsx    ← Đặt lại mật khẩu (recovery)
+├── ProfilePage.tsx          ← Thông tin tài khoản: đổi tên / đổi MK / xóa TK
+├── UpgradePage.tsx          ← Thông tin gói Premium (99.000đ/năm)
+└── UpgradeSuccessPage.tsx   ← Xác nhận thanh toán (poll /auth/me)
 ```
 
 ### 8.3 API Service Layer (`src/lib/api.ts`)
 
 | Hàm | Mô tả |
 |-----|-------|
-| `uploadVideo(file, mode, translationMode, onProgress, sourceLang)` | XHR upload với progress tracking |
+| `uploadVideo(file, processMode, translationMode, onProgress?, sourceLang)` | XHR upload với progress tracking |
 | `getJobStatus(jobId)` | Poll trạng thái job (rate-limit exempt) |
-| `pollUntilDone(jobId)` | Wait until job completion |
-| `openRealtimeStream(jobId, handlers)` | SSE stream cho realtime mode |
-| `wordsToSubtitles(words)` | Chuyển word array → subtitle items (CPS guard ≤17) |
+| `pollUntilDone(jobId, onUpdate, intervalMs?)` | Poll đến khi job xong; gọi `onUpdate` mỗi lần poll |
+| `openRealtimeStream(jobId, handlers)` | SSE stream cho realtime mode (EventSource + token query) |
+| `wordsToSubtitles(words, maxChars?)` | Chuyển word array → subtitle items (CPS guard ≤17) |
 | `getSrtUrl(jobId, lang)` | Lấy signed URL tải SRT từ Supabase Storage |
+| `downloadSrt(jobId, lang)` | Tải file SRT trực tiếp về máy |
+| `getVideoUrl(videoFilename)` | Signed URL video gốc cho Editor |
 | `exportVideo(jobId, resolution, lang)` | Burn subtitles vào video (async) |
+| `getExportStatus(exportId)` / `pollExportUntilDone(exportId, onUpdate?)` | Poll trạng thái export video |
+| `getAuthHeader()` / `authFetch(path, init?)` | Helper gắn JWT cho request backend |
+| `updateProfile(fullName)` / `changePassword(newPassword)` / `deleteAccount()` | Quản lý tài khoản |
 
 ---
 
@@ -1221,18 +1234,34 @@ src/app/pages/
 
 ### 9.1 Biến môi trường
 
+**Backend (Flask):**
+
 | Biến | Bắt buộc | Mô tả |
 |------|---------|-------|
-| `COLAB_URL` | Có | URL ngrok của Colab VM chính (Whisper + VinAI) |
-| `COLAB_REALTIME_URL` | Không | URL ngrok cho realtime (fallback về COLAB_URL) |
-| `SECRET_KEY` | Prod | Flask session secret key |
+| `COLAB_URL` | Có | URL ngrok của Colab VM chính (Whisper + VinAI). App raise nếu là placeholder/không https |
+| `COLAB_REALTIME_URL` | Không | URL ngrok cho realtime (fallback về `COLAB_URL`) |
+| `SECRET_KEY` | Prod | Flask session secret (raise nếu thiếu khi không debug; dev mặc định `dev-secret-change-in-prod`) |
 | `SUPABASE_URL` | Có | URL Supabase project |
-| `SUPABASE_SERVICE_ROLE_KEY` | Có | Supabase admin key |
-| `SUPABASE_JWT_SECRET` | Có | JWT signing secret (HS256) |
-| `FLASK_DEBUG` | Không | Debug mode (default: false) |
-| `PORT` | Không | Flask listen port (default: 5000) |
-| `FRONTEND_URL` | Có | CORS allowed origin |
-| `VITE_API_URL` | Frontend | URL backend API (default: `/api`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Có | Supabase admin key (service role, bypass RLS) |
+| `SUPABASE_JWT_SECRET` | Không* | JWT HS256 secret — chỉ dùng ở nhánh fallback (chính: `supabase.auth.get_user`) |
+| `FLASK_DEBUG` | Không | Debug mode (default: `false`) |
+| `PORT` | Không | Flask listen port (default: `5000`) |
+| `FRONTEND_URL` | Không | CORS origin (default: `http://localhost:5173`) |
+| `MOMO_PARTNER_CODE` / `MOMO_ACCESS_KEY` / `MOMO_SECRET_KEY` | Thanh toán | Thông tin MoMo; thiếu → `/payment/create-order` trả 503 |
+| `MOMO_ENDPOINT` | Không | MoMo create endpoint (default: sandbox `test-payment.momo.vn`) |
+| `NGROK_URL` | Thanh toán | Base URL công khai cho MoMo IPN (`{NGROK_URL}/api/payment/ipn`) |
+| `OPENAI_API_KEY` | Không | Bắt buộc cho `/jobs/<id>/translation-quality` (LLM-as-judge) |
+| `REDIS_URL` | Không | Backend cho Flask-Limiter (default: `memory://`, per-process) |
+
+**Frontend (Vite — đặt ở `.env.local`):**
+
+| Biến | Bắt buộc | Mô tả |
+|------|---------|-------|
+| `VITE_API_URL` | Có | URL backend API (vd `http://localhost:5000/api`) |
+| `VITE_SUPABASE_URL` | Có | URL Supabase project |
+| `VITE_SUPABASE_ANON_KEY` | Có | Supabase anon key (client) |
+
+\* `SUPABASE_JWT_SECRET` được liệt kê trong `.env.example` nhưng code chỉ dùng nó ở nhánh xác thực dự phòng (HS256). Luồng chính dùng `supabase.auth.get_user(token)`.
 
 ### 9.2 Upload limits
 
@@ -1245,18 +1274,43 @@ Colab timeout = 600s (10 phút)
 
 ## 10. API Endpoints
 
-| Method | URL | Mô tả | Auth |
-|--------|-----|-------|------|
-| GET | `/api/health` | Server health + Colab status | - |
-| POST | `/api/upload` | Upload video, tạo job | Required |
-| GET | `/api/jobs/<id>` | Poll job status | Required |
-| GET | `/api/jobs/<id>/stream` | SSE realtime stream | Required |
-| GET | `/api/jobs/<id>/srt-url?lang=en\|vi` | Signed URL tải SRT từ Supabase Storage (TTL 3600s) | Required |
-| POST | `/api/export` | Burn subtitles vào video (async, trả 202) | Required |
-| GET | `/api/export-status/<export_id>` | Poll trạng thái export | Required |
-| POST | `/api/jobs/<id>/optimize` | Optimize VI subtitles | Premium |
-| GET | `/api/jobs/<id>/report?lang=en\|vi` | Quality report (CPS/CPL/gap/repetition) | Required |
-| GET | `/api/jobs/<id>/translation-quality` | LLM-as-judge đánh giá bản dịch | Required |
+**Blueprint prefixes:** `subtitle_bp` → `/api`, `auth_bp` → `/api/auth`, `payment_bp` → `/api/payment`.
+
+### Subtitle & video (`/api`)
+
+| Method | URL | Mô tả | Auth | Rate limit |
+|--------|-----|-------|------|-----------|
+| GET | `/api/health` | Server health + Colab status | - | - |
+| POST | `/api/upload` | Upload video, tạo job | Required | 5/phút |
+| GET | `/api/jobs/<id>` | Poll job status | Required | exempt |
+| GET | `/api/jobs/<id>/stream` | SSE realtime stream | Required | - |
+| GET | `/api/jobs/<id>/srt-url?lang=en\|vi` | Signed URL tải SRT từ Supabase Storage (TTL 3600s) | Required | - |
+| GET | `/api/video/<filename>` | Signed URL video gốc (cho Editor playback) | Required | - |
+| POST | `/api/export` | Burn subtitles vào video (async, trả 202) | Required | 10/phút |
+| GET | `/api/export-status/<export_id>` | Poll trạng thái export | Required | - |
+| GET | `/api/exports/<filename>` | Tải video đã gắn phụ đề (download_url từ export-status) | Required | - |
+| POST | `/api/jobs/<id>/optimize` | Optimize VI subtitles | Premium | - |
+| GET | `/api/jobs/<id>/report?lang=en\|vi&srt=original\|optimized` | Quality report (CPS/CPL/gap/repetition) | Required | - |
+| GET | `/api/jobs/<id>/translation-quality` | LLM-as-judge đánh giá bản dịch | Required | 10/phút |
+
+### Account (`/api/auth`)
+
+| Method | URL | Mô tả | Auth | Rate limit |
+|--------|-----|-------|------|-----------|
+| GET | `/api/auth/me` | Lấy profile người dùng hiện tại | Required | 60/phút |
+| PATCH | `/api/auth/profile` | Cập nhật họ tên | Required | 30/phút |
+| POST | `/api/auth/change-password` | Đổi mật khẩu | Required | 10/phút |
+| DELETE | `/api/auth/account` | Xóa tài khoản | Required | 5/giờ |
+| POST | `/api/auth/sse-token` | Cấp token ngắn hạn cho EventSource | Required | 30/phút |
+
+> Đăng ký / đăng nhập **không có route backend** — xử lý phía client bằng Supabase Auth (`signUp`, `signInWithPassword`, OAuth).
+
+### Payment (`/api/payment`)
+
+| Method | URL | Mô tả | Auth | Rate limit |
+|--------|-----|-------|------|-----------|
+| POST | `/api/payment/create-order` | Tạo đơn MoMo, trả `payment_url` | Required | 3/phút |
+| POST | `/api/payment/ipn` | MoMo IPN callback (server-to-server) | - | - |
 
 ### Upload Request
 
@@ -1646,3 +1700,29 @@ Whisper trả về `probability` per-word nhưng hiện tại backend **không f
 - Đây là dấu hiệu đặc trưng của Whisper hallucination, thường xảy ra trên audio nhiễu hoặc im lặng kéo dài
 
 Nếu muốn confidence-based detection chính xác hơn, cần sửa Colab notebook để forward trường `probability` từ Whisper word objects vào response.
+
+---
+
+## 14. Tài liệu & Kiểm thử
+
+Tài liệu phân tích & kiểm thử nằm trong thư mục [docs/](docs/):
+
+| Tài liệu | Nội dung |
+|----------|---------|
+| [docs/usecase_details_subai.md](docs/usecase_details_subai.md) | Đặc tả chi tiết 11 use case (tác nhân, tiền/hậu điều kiện, luồng chính/thay thế/ngoại lệ) |
+| [docs/sequence.md](docs/sequence.md) | 11 biểu đồ tuần tự (Mermaid `sequenceDiagram`) cho toàn bộ use case — xác thực, upload, editor, xuất, thanh toán, tài khoản |
+| [docs/test_cases.md](docs/test_cases.md) | 62 test case kiểm thử thủ công cho các luồng quan trọng (dạng bảng, có cột Pass/Fail) |
+
+### 14.1 Phạm vi kiểm thử thủ công
+
+[docs/test_cases.md](docs/test_cases.md) phủ các nhóm sau (bám sát code thực tế — thông báo lỗi và giá trị giới hạn là chính xác với hệ thống):
+
+| Nhóm | Số test case | Phạm vi |
+|------|:---:|---------|
+| Xác thực (TC-AUTH) | 17 | Đăng ký Magic Link, đăng nhập, quên mật khẩu OTP, Google, bảo vệ route |
+| Upload (TC-UPLOAD) | 12 | Normal/Realtime, định dạng, hạn mức 5 video/tháng, khóa Realtime |
+| Editor (TC-EDIT) | 15 | Xem, chỉnh sửa, Undo/Redo, tải SRT, xuất video 360p/720p/1080p |
+| Thanh toán (TC-PAY) | 9 | MoMo create-order, success/timeout, đã Premium, rate limit |
+| Tài khoản (TC-PROFILE) | 9 | Xem thông tin, đổi tên, đổi mật khẩu, xóa tài khoản |
+
+> Lưu ý: các test case phụ thuộc Colab (xử lý ASR/dịch thực tế) cần môi trường Colab VM1/VM2 hoạt động để chạy đến kết quả cuối.

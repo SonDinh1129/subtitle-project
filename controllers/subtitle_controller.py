@@ -39,7 +39,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from models.subtitle_model import (
-    create_job, get_job, update_job, run_pipeline,
+    create_job, get_job, run_pipeline,
     run_pipeline_realtime,
     export_burned_video,
     JobStatus, UPLOAD_DIR,
@@ -506,16 +506,14 @@ def optimize_job_subtitles(job_id):
     optimized = optimize_subtitles(blocks)
     result_srt = write_srt(optimized)
 
-    # Write optimized file (safe filename via pathlib)
+    # Write optimized file (safe filename via pathlib).
+    # Path stays consistent with quality_report's lookup: {job_id}_vi_optimized.srt
+    # No update_job() here — the optimized path is derived from disk on read, and
+    # vi_srt_optimized_path is not a Postgres column (would fail the UPDATE).
     p = Path(vi_srt_path)
     opt_path = str(p.with_stem(p.stem + "_optimized"))
     with open(opt_path, "w", encoding="utf-8") as f:
         f.write(result_srt)
-
-    # TODO: vi_srt_optimized_path is not a Postgres column; this update_job call will
-    # fail against Supabase at runtime. Fix in a future task by adding the column or
-    # storing optimized path only in the in-memory cache.
-    update_job(job_id, vi_srt_optimized_path=opt_path)
 
     return jsonify(
         message="Optimized successfully",
@@ -555,7 +553,8 @@ def quality_report(job_id: str):
     if lang == "en":
         srt_path = str(OUTPUT_DIR / f"{job_id}_en.srt")
     elif srt_variant == "optimized":
-        # TODO: vi_srt_optimized_path is not a Postgres column; for now construct local path
+        # Optimized path is derived from disk (not stored in Postgres).
+        # Must match the filename written by /optimize: {job_id}_vi_optimized.srt
         srt_path = str(OUTPUT_DIR / f"{job_id}_vi_optimized.srt")
         if not os.path.exists(srt_path):
             return jsonify(error="Optimized SRT not found — run /optimize first"), 404
