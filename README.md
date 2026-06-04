@@ -1724,5 +1724,6 @@ Tài liệu phân tích & kiểm thử nằm trong thư mục [docs/](docs/):
 | Editor (TC-EDIT) | 15 | Xem, chỉnh sửa, Undo/Redo, tải SRT, xuất video 360p/720p/1080p |
 | Thanh toán (TC-PAY) | 9 | MoMo create-order, success/timeout, đã Premium, rate limit |
 | Tài khoản (TC-PROFILE) | 9 | Xem thông tin, đổi tên, đổi mật khẩu, xóa tài khoản |
+| Bảo mật & Phân quyền (TC-SEC) | 26 | Auth token (401), IDOR/ownership (403), Premium gate, rate limit (429), path traversal, IPN giả mạo |
 
-> Lưu ý: các test case phụ thuộc Colab (xử lý ASR/dịch thực tế) cần môi trường Colab VM1/VM2 hoạt động để chạy đến kết quả cuối.
+> Lưu ý: các test case phụ thuộc Colab (xử lý ASR/dịch thực tế) cần môi trường Colab VM1/VM2 hoạt động để chạy đến kết quả cuối. Nhóm TC-SEC test ở tầng API backend (curl/Postman) với 2 tài khoản A/B.

@@ -1,6 +1,6 @@
 # Tài liệu Kiểm thử thủ công — Hệ thống SubAI
 
-Tài liệu trình bày các trường hợp kiểm thử (test case) thủ công cho **các luồng quan trọng nhất** của hệ thống SubAI: Xác thực, Upload & xử lý video, Editor (xem / sửa / tải SRT / xuất video), Thanh toán nâng cấp Premium, và Quản lý tài khoản.
+Tài liệu trình bày các trường hợp kiểm thử (test case) thủ công cho **các luồng quan trọng nhất** của hệ thống SubAI: Xác thực, Upload & xử lý video, Editor (xem / sửa / tải SRT / xuất video), Thanh toán nâng cấp Premium, Quản lý tài khoản, và **Bảo mật & phân quyền truy cập tài nguyên**.
 
 > Các test case dưới đây được viết **bám sát code thực tế** (các trang trong `src/app/pages/` và controller backend), nên thông báo lỗi, giá trị giới hạn và đường dẫn điều hướng là chính xác với hệ thống hiện tại.
 
@@ -141,6 +141,60 @@ Tài liệu trình bày các trường hợp kiểm thử (test case) thủ côn
 
 ---
 
+## 6. Nhóm Bảo mật & Phân quyền truy cập tài nguyên
+
+> Đây là các test ở **tầng API backend** (gọi trực tiếp bằng `curl`/Postman), nhằm chứng minh hệ thống chống truy cập trái phép. Mọi endpoint job-based đều kiểm tra `job.user_id == token.user_id` và trả **403 "Forbidden"** nếu không khớp (chống **IDOR** — Insecure Direct Object Reference).
+>
+> **Chuẩn bị:** 2 tài khoản A và B. Đăng nhập từng tài khoản lấy `access_token` (qua Supabase, xem mục 13.2 của README). Tạo trước 1 job thuộc **A** (`JOB_A`) và 1 export thuộc A (`EXPORT_A`). Dùng `TOKEN_A`, `TOKEN_B`.
+
+### 6.1 Xác thực token (Authentication)
+
+| ID | Mô tả | Tiền điều kiện | Các bước | Kết quả mong đợi | KQ thực tế | P/F |
+|---|---|---|---|---|---|---|
+| TC-SEC-01 | Gọi API không kèm token | — | `GET /api/jobs/<JOB_A>` không có header Authorization | **401** `{"error":"Authentication required"}` | | |
+| TC-SEC-02 | Token sai/giả mạo | — | Gọi API với `Authorization: Bearer abc.def.ghi` (token rác) | **401** `Invalid token` | | |
+| TC-SEC-03 | Token hết hạn | Có token đã expired | Gọi API với token hết hạn | **401** `Token expired` (hoặc Invalid token) | | |
+| TC-SEC-04 | Truy cập route được bảo vệ ở FE khi chưa đăng nhập | Chưa đăng nhập | Mở thẳng `/upload`, `/editor`, `/profile`, `/upgrade` | Bị chuyển hướng về trang đăng nhập (ProtectedRoute) | | |
+| TC-SEC-05 | SSE qua query token | Đã đăng nhập | `GET /api/jobs/<JOB_A>/stream?token=<TOKEN_A>` | Kết nối SSE thành công (token nhận qua query param) | | |
+| TC-SEC-06 | SSE thiếu token | — | `GET /api/jobs/<JOB_A>/stream` không token | **401** | | |
+
+### 6.2 Phân quyền sở hữu tài nguyên (IDOR / Ownership)
+
+| ID | Mô tả | Tiền điều kiện | Các bước | Kết quả mong đợi | KQ thực tế | P/F |
+|---|---|---|---|---|---|---|
+| TC-SEC-07 | B xem job của A | JOB_A thuộc A | `GET /api/jobs/<JOB_A>` với `TOKEN_B` | **403** `{"error":"Forbidden"}` | | |
+| TC-SEC-08 | B lấy SRT của A | JOB_A có SRT | `GET /api/jobs/<JOB_A>/srt-url?lang=vi` với `TOKEN_B` | **403** `Forbidden` | | |
+| TC-SEC-09 | B xuất video từ job của A | JOB_A done | `POST /api/export` body `{job_id: JOB_A}` với `TOKEN_B` | **403** `Forbidden` | | |
+| TC-SEC-10 | B xem trạng thái export của A | EXPORT_A thuộc A | `GET /api/export-status/<EXPORT_A>` với `TOKEN_B` | **403** `Forbidden` | | |
+| TC-SEC-11 | B đọc quality report của A | JOB_A done | `GET /api/jobs/<JOB_A>/report?lang=vi` với `TOKEN_B` | **403** `Forbidden` | | |
+| TC-SEC-12 | B optimize job của A | JOB_A done, B là Premium | `POST /api/jobs/<JOB_A>/optimize` với `TOKEN_B` | **403** `Forbidden` (ownership chặn trước cả khi B là Premium) | | |
+| TC-SEC-13 | B đánh giá dịch thuật job của A | JOB_A done | `GET /api/jobs/<JOB_A>/translation-quality` với `TOKEN_B` | **403** `Forbidden` | | |
+| TC-SEC-14 | Truy cập job không tồn tại | — | `GET /api/jobs/<UUID-ngẫu-nhiên>` với `TOKEN_A` | **404** `Job not found` (không lộ thông tin job người khác) | | |
+| TC-SEC-15 | B tải video gốc của A | Video JOB_A còn trên server | `GET /api/video/<JOB_A>_<tên>.mp4` với `TOKEN_B` | **403** `Forbidden` | | |
+| TC-SEC-16 | B tải video export của A | File export JOB_A tồn tại | `GET /api/exports/<JOB_A>_vi_720p.mp4` với `TOKEN_B` | **403** `Forbidden` | | |
+
+### 6.3 Phân quyền tính năng Premium
+
+| ID | Mô tả | Tiền điều kiện | Các bước | Kết quả mong đợi | KQ thực tế | P/F |
+|---|---|---|---|---|---|---|
+| TC-SEC-17 | TK Free gọi optimize (Premium-only) | A là Free, JOB_A thuộc A | `POST /api/jobs/<JOB_A>/optimize` với `TOKEN_A` | **403** code **`PREMIUM_REQUIRED`** | | |
+| TC-SEC-18 | TK Free upload Realtime (API) | A là Free | `POST /api/upload` `process_mode=realtime` với `TOKEN_A` | **403** code **`PREMIUM_REQUIRED`** | | |
+| TC-SEC-19 | TK Free vượt hạn mức video | A đã dùng 5 video/tháng | `POST /api/upload` (Normal) video thứ 6 | **403** code **`LIMIT_REACHED`** | | |
+| TC-SEC-20 | TK Free tạo đơn rồi tự gọi lại khi đã Premium | A vừa thành Premium | `POST /api/payment/create-order` với `TOKEN_A` | **409** `Already premium` | | |
+
+### 6.4 Lạm dụng & rò rỉ thông tin
+
+| ID | Mô tả | Tiền điều kiện | Các bước | Kết quả mong đợi | KQ thực tế | P/F |
+|---|---|---|---|---|---|---|
+| TC-SEC-21 | Path traversal khi tải file | — | `GET /api/exports/..%2F..%2F.env` với `TOKEN_A` | Không lộ file ngoài thư mục outputs (tên file bị chuẩn hóa về basename) → **404** | | |
+| TC-SEC-22 | Rate limit upload | Đã đăng nhập | Gọi `POST /api/upload` > 5 lần/phút | Bị chặn **429 Too Many Requests** | | |
+| TC-SEC-23 | Rate limit tạo đơn thanh toán | Đã đăng nhập | Gọi `POST /api/payment/create-order` > 3 lần/phút | Bị chặn **429** | | |
+| TC-SEC-24 | Rate limit đổi mật khẩu | Đã đăng nhập | Gọi `POST /api/auth/change-password` > 10 lần/phút | Bị chặn **429** | | |
+| TC-SEC-25 | Response job không lộ đường dẫn nội bộ | JOB_A done | `GET /api/jobs/<JOB_A>` với `TOKEN_A` | Body chỉ chứa field an toàn (job_id, status, words, text…); **không** có `video_path` / storage path nội bộ | | |
+| TC-SEC-26 | MoMo IPN từ chối chữ ký giả | — | `POST /api/payment/ipn` với body chữ ký sai | Trả 200 nhưng **không** nâng cấp Premium (verify chữ ký thất bại → bỏ qua) | | |
+
+---
+
 ## Bảng tổng hợp kết quả
 
 | Nhóm | Tổng số TC | Pass | Fail | Ghi chú |
@@ -150,4 +204,5 @@ Tài liệu trình bày các trường hợp kiểm thử (test case) thủ côn
 | Editor (TC-EDIT) | 15 | | | |
 | Thanh toán (TC-PAY) | 9 | | | |
 | Tài khoản (TC-PROFILE) | 9 | | | |
-| **Tổng** | **62** | | | |
+| Bảo mật & Phân quyền (TC-SEC) | 26 | | | |
+| **Tổng** | **88** | | | |
