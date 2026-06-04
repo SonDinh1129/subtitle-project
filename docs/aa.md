@@ -20,7 +20,7 @@
 
      <a name="_toc231346667"></a>*Hình *3*.*1*: Luồng xử lý nghiệp vụ xử lý video và âm thanh*
 
-     Trạng thái job được biểu diễn bằng một enum hữu hạn (JobStatus) gồm các giá trị PENDING, EXTRACTING, VAD, ENCODING, TRANSCRIBING, POST\_PROCESSING, DONE, FAILED. Mỗi lần chuyển trạng thái, hàm update\_job đồng thời cập nhật phần trăm tiến độ ví dụ 0 → 10 → 20 → 40 → 80 → 95 → 100 và đẩy sự kiện vào hàng đợi SSE để frontend hiển thị thanh tiến trình mượt mà.
+     Trạng thái job được biểu diễn bằng một tập hằng số trạng thái hữu hạn (JobStatus) gồm các giá trị QUEUED, EXTRACTING, TRANSCRIBING, TRANSLATING, ALIGNING, GENERATING\_SRT, DONE, ERROR. Mỗi lần chuyển trạng thái, hàm update\_job đồng thời cập nhật phần trăm tiến độ — ở chế độ batch là 5 → 20 → 40 → (tăng dần 40–78 theo số batch đã xử lý) → 80 → 100 — và đẩy sự kiện vào hàng đợi SSE để frontend hiển thị thanh tiến trình mượt mà.
   1  ### <a name="_toc231502374"></a>**Tiền xử lý: Trích xuất và chuẩn hóa âm thanh**
      Bước đầu tiên trong pipeline là tách luồng âm thanh ra khỏi tệp video gốc bằng công cụ FFmpeg. Lý do lựa chọn FFmpeg gồm: (i) khả năng xử lý hầu hết các định dạng container video phổ biến (MP4, MKV, AVI, MOV, WEBM…) mà không yêu cầu cài đặt codec bổ sung; (ii) cho phép chỉ định chính xác các thông số đầu ra trong một lệnh duy nhất, tránh phải qua nhiều bước trung gian; (iii) hiệu năng cao, đã được tối ưu C/ASM, hỗ trợ tăng tốc phần cứng nếu cần.
 
@@ -79,7 +79,7 @@ Hàm detect\_speech\_segments(audio\_path) thực hiện toàn bộ quá trình 
 
 1. **Xử lý trường hợp đặc biệt**
 
-Nếu detect\_speech\_segments() trả về danh sách rỗng, hệ thống kết luận toàn bộ audio không chứa tiếng nói. Trong cài đặt hiện tại, pipeline ném ra RuntimeError("No speech detected in the video."), controller bắt ngoại lệ này và đánh dấu job ở trạng thái FAILED kèm thông điệp hiển thị cho người dùng. Hướng phát triển trong tương lai có thể bổ sung cơ chế fallback — tạo một segment phủ toàn bộ thời lượng audio và vẫn gửi qua ASR — nhằm xử lý các tình huống VAD bỏ sót giọng nói có âm lượng rất nhỏ hoặc bị chìm trong nhạc nền.
+Nếu detect\_speech\_segments() trả về danh sách rỗng, hệ thống kết luận toàn bộ audio không chứa tiếng nói. Trong cài đặt hiện tại, pipeline ném ra RuntimeError("No speech detected in the video."), controller bắt ngoại lệ này và đánh dấu job ở trạng thái ERROR kèm thông điệp hiển thị cho người dùng. Hướng phát triển trong tương lai có thể bổ sung cơ chế fallback — tạo một segment phủ toàn bộ thời lượng audio và vẫn gửi qua ASR — nhằm xử lý các tình huống VAD bỏ sót giọng nói có âm lượng rất nhỏ hoặc bị chìm trong nhạc nền.
 1  ### <a name="_toc231502376"></a>**Chuẩn hóa và phân đoạn** 
    Danh sách segment thô từ VAD thường chứa hai vấn đề đối lập: một số segment quá dài như việc: diễn giả nói liên tục nhiều chục giây, một số khác quá ngắn như từ đơn lẻ hoặc tiếng đệm. Cả hai trường hợp đều không lý tưởng để gửi lên ASR: segment quá dài tăng rủi ro timeout và làm giảm độ chính xác phân đoạn câu của Whisper, trong khi segment quá ngắn tạo ra nhiều request không hiệu quả và làm vỡ ngữ cảnh.
 
@@ -152,13 +152,13 @@ Cách xếp thứ tự split trước merge giúp đảm bảo: (i) không có s
 
    |**Khía cạnh**|**Batch**|**Realtime**|
    | - | - | - |
-   |Vị trí chạy VAD|Backend|VM2|
-   |Vị trí chạy ASR|Colab VM|VM2|
+   |Vị trí chạy VAD|Backend|VM2 (chỉ tiếng Việt); tiếng Anh không dùng VAD|
+   |Vị trí chạy ASR|VM2 (Colab)|VM1 cho tiếng Anh (Kyutai), VM2 cho tiếng Việt (PhoWhisper)|
    |Giao thức truyền|HTTP POST + base 64|WebSocket nhị phân|
-   |Cấu hình endpoint|COLAB\_URL|COLAB\_REALTIME\_URL|
+   |Cấu hình endpoint|COLAB\_URL (VM2)|COLAB\_REALTIME\_URL (VM1, EN) / COLAB\_URL (VM2, VI)|
    |Độ trễ|Chấp nhận cao|Yêu cầu thấp (< 2s)|
 
-   Trong realtime, các audio frame được stream trực tiếp lên VM2 qua WebSocket. Silero VAD và mô hình PhoWhisper chạy ngay trên VM2, trả về transcript từng đoạn theo thời gian thực. Backend chuyển tiếp kết quả này tới frontend qua Server-Sent Events, cho phép giao diện hiển thị phụ đề từng phần ngay trong quá trình xử lý mà không cần đợi toàn bộ audio kết thúc. Đường dẫn WebSocket VI là /ws/transcribe\_vi\_realtime.
+   Trong realtime, các audio frame được stream trực tiếp lên VM qua WebSocket. Với tiếng Anh, mô hình Kyutai streaming-native chạy trên VM1; với tiếng Việt, Silero VAD và mô hình PhoWhisper chạy trên VM2, trả về transcript từng đoạn theo thời gian thực. Backend chuyển tiếp kết quả này tới frontend qua Server-Sent Events, cho phép giao diện hiển thị phụ đề từng phần ngay trong quá trình xử lý mà không cần đợi toàn bộ audio kết thúc. Đường dẫn WebSocket EN là /ws/transcribe\_kyutai (VM1), VI là /ws/transcribe\_vi\_realtime (VM2).
 1  ### <a name="_toc231502379"></a>**Yêu cầu hiệu năng và giới hạn kỹ thuật**
    Một số ràng buộc kỹ thuật cần lưu ý trong vận hành thực tế của phân hệ này. Về khởi tạo model, load\_vad() phải được gọi trước khi bất kỳ request nào đến detect\_speech\_segments(); nếu model chưa được tải, hệ thống ném RuntimeError. Triển khai khuyến nghị là eager loading ngay khi server khởi động thay vì on-demand, để tránh độ trễ lần đầu và làm các request đầu tiên có hành vi nhất quán.
 
@@ -177,35 +177,36 @@ Cách xếp thứ tự split trước merge giúp đảm bảo: (i) không có s
    1  ### <a name="_toc231502382"></a>**Kiến trúc tổng thể hệ thống ASR**
       Hệ thống ASR được tổ chức theo mô hình client–server phân tán, trong đó backend Python đóng vai trò client điều phối, còn năng lực inference nằm hoàn toàn trên hai Colab VM kết nối qua đường hầm ngrok:
 
-      Địa chỉ kết nối của cả hai VM được cấu hình qua biến môi trường COLAB\_URL (VM1) và COLAB\_REALTIME\_URL (VM2) trong tệp .env.local, cho phép thay đổi endpoint mà không cần sửa mã nguồn — điều cần thiết vì ngrok tạo URL mới mỗi phiên Colab.
+      Địa chỉ kết nối của cả hai VM được cấu hình qua biến môi trường COLAB\_REALTIME\_URL (VM1 — realtime Kyutai) và COLAB\_URL (VM2 — batch + realtime tiếng Việt) trong tệp .env.local, cho phép thay đổi endpoint mà không cần sửa mã nguồn — điều cần thiết vì ngrok tạo URL mới mỗi phiên Colab.
 
-      Lý do tách hai VM: Colab miễn phí giới hạn về VRAM và session, nếu nạp đồng thời cả pipeline batch (Faster-Whisper + PhoWhisper + VinAI MT) lẫn pipeline realtime (Kyutai + Moshi) thì rất dễ vượt ngưỡng và gây OOM. Tách hai VM còn cho phép: (i) warm cache độc lập cho từng pipeline; (ii) fail isolation — sự cố ở VM realtime không kéo theo gián đoạn dịch vụ batch; (iii) scale dọc từng VM theo nhu cầu thực tế của mỗi loại workload.
-   1  ### <a name="_toc231502383"></a>**Batch Mode – VM1**
+      Lý do tách hai VM: Colab miễn phí giới hạn về VRAM và session, nếu nạp đồng thời cả pipeline realtime tiếng Anh (Kyutai + Moshi) lẫn pipeline batch (Faster-Whisper + PhoWhisper + VinAI MT) thì rất dễ vượt ngưỡng và gây OOM. Tách hai VM còn cho phép: (i) warm cache độc lập cho từng pipeline; (ii) fail isolation — sự cố ở VM realtime không kéo theo gián đoạn dịch vụ batch; (iii) scale dọc từng VM theo nhu cầu thực tế của mỗi loại workload.
+   1  ### <a name="_toc231502383"></a>**Batch Mode – VM2**
 1. **Các mô hình sử dụng**
 
-VM1 triển khai ba mô hình chạy tuần tự trong một pipeline duy nhất.
+VM2 (cấu hình qua COLAB\_URL) triển khai bốn mô hình phục vụ pipeline batch, chọn mô hình theo ngôn ngữ nguồn.
 
 Faster-Whisper large-v3 đảm nhận nhận dạng tiếng Anh. Đây là bản tối ưu hóa của OpenAI Whisper large-v3, được chuyển đổi sang định dạng CTranslate2 để tăng tốc inference trên GPU với mức tiêu thụ VRAM thấp hơn. Mô hình hỗ trợ trả về word-level timestamps — thông tin thiết yếu để căn chỉnh phụ đề chính xác đến từng từ.
 
 PhoWhisper large đảm nhận nhận dạng tiếng Việt. Đây là mô hình do nhóm VinAI phát triển, được fine-tune đặc biệt cho tiếng Việt bao gồm các phương ngữ và đặc thù ngữ âm học của tiếng Việt. Mô hình cũng được chuyển đổi sang CTranslate2 để tích hợp với thư viện faster-whisper.
 
-VinAI vinai-translate-en2vi-v2 đảm nhận dịch máy EN→VI. Đây là mô hình seq2seq dựa trên kiến trúc mBART, cho tốc độ dịch gần như tức thì với các đoạn văn bản độ dài phụ đề thông thường.
+VinAI vinai-translate-en2vi-v2 và vinai-translate-vi2en-v2 đảm nhận dịch máy hai chiều EN→VI và VI→EN. Đây là các mô hình seq2seq dựa trên kiến trúc mBART, cho tốc độ dịch gần như tức thì với các đoạn văn bản độ dài phụ đề thông thường.
 
-Bảng tổng hợp thông số các mô hình trên VM1:
+Bảng tổng hợp thông số các mô hình trên VM2:
 
-<a name="_toc231346704"></a>*Bảng *3*.*4*: Bảng tổng hợp thông số các mô hình trên Colab VM1*
+<a name="_toc231346704"></a>*Bảng *3*.*4*: Bảng tổng hợp thông số các mô hình trên Colab VM2*
 
 |**Mô hình**|**Nhiệm vụ**|**Kích thước**|**VRAM**|**Tốc độ**|
 | - | - | - | - | - |
 |Faster-Whisper large-v3|ASR (EN)|~3 GB|~2 GB|~10× realtime|
 |PhoWhisper large (CTranslate2)|ASR (VI)|~1.5 GB|~2 GB|~5–8× realtime|
 |VinAI vinai-translate-en2vi-v2|MT (EN→VI)|~300 MB|~2 GB|Gần tức thì|
+|VinAI vinai-translate-vi2en-v2|MT (VI→EN)|~300 MB|~2 GB|Gần tức thì|
 
 Tất cả các mô hình sử dụng precision float16 trên CUDA để tối ưu tốc độ và tiết kiệm VRAM.
 
 1. **Giao thức kết nối và luồng xử lý**
 
-Backend giao tiếp với VM1 thông qua lớp ColabClient bằng giao thức HTTP POST. Endpoint nhận request là POST {COLAB\_URL}/transcribe\_translate, được VM1 phục vụ qua Flask API.
+Backend giao tiếp với VM2 thông qua lớp ColabClient bằng giao thức HTTP POST. Endpoint nhận request là POST {COLAB\_URL}/transcribe\_translate, được VM2 phục vụ qua Flask API.
 
 Cấu trúc payload thực tế:
 
@@ -223,19 +224,19 @@ Trong đó translation\_mode quy định cách áp dụng dịch máy, source\_l
 
 Luồng xử lý batch diễn ra như sau:
 
-Bên cạnh endpoint transcribe\_translate trả kết quả một lần, VM1 còn cung cấp endpoint transcribe\_translate\_stream (Server-Sent Events). Endpoint này cho phép VM đẩy kết quả của từng segment ngay khi vừa inference xong, thay vì chờ toàn bộ batch hoàn tất; backend dùng phương thức ColabClient.transcribe\_translate\_stream() để consume luồng SSE này và push tiếp về frontend, giúp người dùng thấy tiến độ mượt hơn với các video dài.
+Bên cạnh endpoint transcribe\_translate trả kết quả một lần, VM2 còn cung cấp endpoint transcribe\_translate\_stream (Server-Sent Events). Endpoint này cho phép VM đẩy kết quả của từng segment ngay khi vừa inference xong, thay vì chờ toàn bộ batch hoàn tất; backend dùng phương thức ColabClient.transcribe\_translate\_stream() để consume luồng SSE này và push tiếp về frontend, giúp người dùng thấy tiến độ mượt hơn với các video dài.
 
 Về cơ chế độ tin cậy, ColabClient.transcribe\_translate() triển khai retry với linear backoff: tối đa 3 lần thử, các mốc chờ giữa các lần là 5 s → 10 s → 15 s (wait = 5 × (attempt + 1)). Cơ chế chỉ retry với nhóm lỗi tạm thời như SSLError, ConnectionError,…; với các lỗi HTTP non-200, payload sai thì raise ngay để fail fast. Header ngrok-skip-browser-warning: true được gắn vào mọi request để bypass màn hình cảnh báo của ngrok tunnel. Timeout đặt ở mức 600s — giá trị cao này phản ánh thực tế rằng một batch lớn nhiều segment có thể mất vài phút để inference trên GPU Colab.
-1  ### <a name="_toc231502384"></a>**Realtime Mode — VM2**
+1  ### <a name="_toc231502384"></a>**Realtime Mode — VM1 (tiếng Anh) và VM2 (tiếng Việt)**
 1. **Kiến trúc và mô hình**
 
-VM2 được thiết kế chuyên biệt cho xử lý streaming, sử dụng kiến trúc hoàn toàn khác VM1 để đảm bảo độ trễ thấp nhất có thể.
+Chế độ realtime được phục vụ bởi hai VM tùy theo ngôn ngữ nguồn: tiếng Anh dùng VM1 (Kyutai, cấu hình qua COLAB\_REALTIME\_URL), còn tiếng Việt dùng VM2 (Silero VAD + PhoWhisper, cấu hình qua COLAB\_URL). Cả hai được thiết kế cho xử lý streaming nhằm đảm bảo độ trễ thấp nhất có thể.
 
-Kyutai stt-1b-en\_fr là mô hình ASR streaming-native với 1 tỷ tham số, được phát triển bởi nhóm Kyutai tại Pháp. Điểm đặc biệt của mô hình này là sử dụng Moshi mimi codec làm audio encoder — thay vì xử lý waveform trực tiếp, âm thanh được mã hóa thành token stream (80 ms/frame ở 24 kHz) trước khi đưa vào mô hình ngôn ngữ. Thiết kế này cho phép mô hình hoạt động với độ trễ cực thấp, đạt tốc độ nhận dạng nhanh hơn realtime.
+Kyutai stt-1b-en\_fr (chạy trên VM1) là mô hình ASR streaming-native với 1 tỷ tham số, được phát triển bởi nhóm Kyutai tại Pháp. Điểm đặc biệt của mô hình này là sử dụng Moshi mimi codec làm audio encoder — thay vì xử lý waveform trực tiếp, âm thanh được mã hóa thành token stream (80 ms/frame ở 24 kHz) trước khi đưa vào mô hình ngôn ngữ. Thiết kế này cho phép mô hình hoạt động với độ trễ cực thấp, đạt tốc độ nhận dạng nhanh hơn realtime. Sau khi nhận dạng tiếng Anh, VM1 dịch tiếp sang tiếng Việt bằng VinAI vinai-translate-en2vi-v2 ngay trên cùng VM.
 
-Mô hình được nạp với precision bf16 trên GPU A100/H100 hoặc fp16 trên T4/V100, tùy loại GPU Colab cấp phát. Để giảm latency lần đầu tiên, VM2 thực hiện warmup bằng cách gửi 5 dummy frame qua mô hình khi khởi động, giúp GPU kernel được cache và sẵn sàng xử lý ngay khi có dữ liệu thực.
+Mô hình được nạp với precision bf16 trên GPU A100/H100 hoặc fp16 trên T4/V100, tùy loại GPU Colab cấp phát. Để giảm latency lần đầu tiên, VM1 thực hiện warmup bằng cách gửi 5 dummy frame qua mô hình khi khởi động, giúp GPU kernel được cache và sẵn sàng xử lý ngay khi có dữ liệu thực.
 
-Với tiếng Việt trong chế độ realtime, VM2 kết hợp Silero VAD để phát hiện vùng nói trong stream và PhoWhisper để transcribe từng đoạn ngay khi VAD xác định kết thúc một đoạn nói. Cách tiếp cận này khác Kyutai ở chỗ không phải streaming-native — vẫn là batch nhỏ trên từng đoạn VAD — nhưng đủ nhanh khi đoạn đủ ngắn.
+Với tiếng Việt trong chế độ realtime, VM2 kết hợp Silero VAD để phát hiện vùng nói trong stream và PhoWhisper để transcribe từng đoạn ngay khi VAD xác định kết thúc một đoạn nói, sau đó dịch VI→EN bằng VinAI vinai-translate-vi2en-v2. Cách tiếp cận này khác Kyutai ở chỗ không phải streaming-native — vẫn là batch nhỏ trên từng đoạn VAD — nhưng đủ nhanh khi đoạn đủ ngắn.
 
 1. **Tham số khung và sample rate**
 
@@ -248,24 +249,24 @@ Hai pipeline EN/VI có cấu hình khung âm thanh khác nhau, do mô hình ngô
 |EN (Kyutai + Moshi)|24 kHz|80 ms|1920|
 |VI (Silero VAD + PhoWhisper)|16 kHz|32 ms|512|
 
-Lớp AudioStreamProducer thiết lập đúng cấu hình theo ngôn ngữ trước khi mở pipe FFmpeg, đảm bảo PCM stream tạo ra khớp với yêu cầu của mô hình phía VM2.
+Lớp AudioStreamProducer thiết lập đúng cấu hình theo ngôn ngữ trước khi mở pipe FFmpeg, đảm bảo PCM stream tạo ra khớp với yêu cầu của mô hình phía VM tương ứng.
 
 1. **Giao thức WebSocket và luồng streaming**
 
-Backend giao tiếp với VM2 thông qua lớp RealtimeStreamClient bằng giao thức WebSocket bảo mật (WSS). Hệ thống duy trì hai endpoint riêng biệt tùy ngôn ngữ:
+Backend giao tiếp với VM realtime thông qua lớp RealtimeStreamClient bằng giao thức WebSocket bảo mật (WSS). Hệ thống định tuyến tới hai endpoint riêng biệt tùy ngôn ngữ, trên hai VM khác nhau:
 
-- wss://{COLAB\_REALTIME\_URL}/ws/transcribe\_kyutai — tiếng Anh (Kyutai)
-- wss://{COLAB\_REALTIME\_URL}/ws/transcribe\_vi\_realtime — tiếng Việt (Silero VAD + PhoWhisper)
+- wss://{COLAB\_REALTIME\_URL}/ws/transcribe\_kyutai — tiếng Anh (Kyutai, VM1)
+- wss://{COLAB\_URL}/ws/transcribe\_vi\_realtime — tiếng Việt (Silero VAD + PhoWhisper, VM2)
 
 Luồng streaming hoạt động theo mô hình producer–consumer bất đồng bộ (asyncio):
 
 Mỗi frame do AudioStreamProducer.iter\_frames() sinh ra được mã hóa base64 PCM float32 và đính kèm frame\_index tăng dần để VM xác định thứ tự. Producer còn áp dụng throttle theo deadline tuyệt đối (start\_time + (frame\_index + 1) × frame\_duration) nhằm phát frame đúng nhịp realtime, tránh dồn ứ buffer ở phía VM. Khi nguồn audio kết thúc, producer phát một sentinel {"type": "END"} để VM flush kết quả cuối cùng và đóng phiên.
 
-Mỗi partial transcript nhận được từ VM2 được backend chuyển tiếp ngay tới frontend qua Server-Sent Events (SSE), cho phép giao diện editor hiển thị phụ đề từng phần theo thời gian thực.
+Mỗi partial transcript nhận được từ VM realtime được backend chuyển tiếp ngay tới frontend qua Server-Sent Events (SSE), cho phép giao diện editor hiển thị phụ đề từng phần theo thời gian thực.
 
-Về độ tin cậy kết nối, RealtimeStreamClient triển khai auto-reconnect tối đa 3 lần với backoff [2 s, 5 s, 10 s]. Kết nối được duy trì bằng cơ chế ping/pong định kỳ 20 giây (ping\_interval=20), ping\_timeout=30, open\_timeout=30. Tương tự VM1, header ngrok-skip-browser-warning: true được gắn vào WebSocket handshake.
+Về độ tin cậy kết nối, RealtimeStreamClient triển khai auto-reconnect tối đa 3 lần với backoff [2 s, 5 s, 10 s]. Kết nối được duy trì bằng cơ chế ping/pong định kỳ 20 giây (ping\_interval=20), ping\_timeout=30, open\_timeout=30. Tương tự VM batch, header ngrok-skip-browser-warning: true được gắn vào WebSocket handshake.
 1  ### <a name="_toc231502385"></a>**Xử lý kết quả và tích hợp về backend**
-   Dù đến từ VM1 (HTTP response / SSE) hay VM2 (WebSocket stream), kết quả ASR đều được chuẩn hóa về cùng một cấu trúc dữ liệu trước khi đưa vào các bước xử lý tiếp theo. Cấu trúc lõi được đồng nhất:
+   Dù đến từ VM2 ở chế độ batch (HTTP response / SSE) hay từ VM realtime (WebSocket stream — VM1 cho tiếng Anh, VM2 cho tiếng Việt), kết quả ASR đều được chuẩn hóa về cùng một cấu trúc dữ liệu trước khi đưa vào các bước xử lý tiếp theo. Cấu trúc lõi được đồng nhất:
 
    `  `"english\_words": [
 
@@ -285,7 +286,7 @@ Về độ tin cậy kết nối, RealtimeStreamClient triển khai auto-reconne
 
    Hai trường english\_words và vietnamese\_words chứa word-level data dùng cho căn chỉnh phụ đề chính xác và sinh SRT bằng hàm words\_to\_srt\_string(). Văn bản đầy đủ ở cấp câu được tổng hợp lại từ các từ này khi cần thiết để hiển thị hoặc export.
 
-   Với chế độ batch, toàn bộ kết quả được nhận một lần sau khi VM1 xử lý xong hoặc theo từng segment qua kênh SSE nếu dùng transcribe\_translate\_stream. Với chế độ realtime, backend tích lũy các partial result vào hai danh sách english\_words và vietnamese\_words theo thời gian, đồng thời đẩy từng phần qua SSE để frontend hiển thị ngay. Khi nhận event done, backend tổng hợp kết quả cuối, gọi words\_to\_srt\_string() và lưu file SRT vào outputs/.
+   Với chế độ batch, toàn bộ kết quả được nhận một lần sau khi VM2 xử lý xong hoặc theo từng segment qua kênh SSE nếu dùng transcribe\_translate\_stream. Với chế độ realtime, backend tích lũy các partial result vào hai danh sách english\_words và vietnamese\_words theo thời gian, đồng thời đẩy từng phần qua SSE để frontend hiển thị ngay. Khi nhận event done, backend tổng hợp kết quả cuối, gọi words\_to\_srt\_string() và lưu file SRT vào outputs/.
 1  ### <a name="_toc231502386"></a>**Đánh giá chất lượng ASR**
    Chất lượng hệ thống ASR được đánh giá theo các chỉ số tiêu chuẩn trong nghiên cứu nhận dạng tiếng nói.
 
@@ -331,7 +332,7 @@ Hàm này được gọi ngay sau khi ASR trả về words và trước khi th�
 
    Mô hình vinai-translate-en2vi-v2 thuộc họ kiến trúc mBART, được VinAI fine-tune đặc biệt cho cặp ngôn ngữ Anh–Việt. So với các giải pháp dịch máy đa ngôn ngữ tổng quát như NLLB hay M2M-100, mô hình này cho chất lượng dịch tốt hơn đáng kể trên các chủ đề thông dụng nhờ tập huấn luyện chuyên biệt cho tiếng Việt.
 
-   Tham số translation\_mode trong payload gửi tới VM1 quyết định cấp độ dịch theo từng segment hoặc theo từng câu sau khi gộp, còn source\_lang xác định ngôn ngữ nguồn. Kết quả dịch được gắn vào cấu trúc response song song với bản gốc tiếng Anh, cho phép hệ thống cung cấp đồng thời cả hai phiên bản mà không cần gọi thêm request:
+   Tham số translation\_mode trong payload gửi tới VM2 quyết định cấp độ dịch theo từng segment hoặc theo từng câu sau khi gộp, còn source\_lang xác định ngôn ngữ nguồn. Kết quả dịch được gắn vào cấu trúc response song song với bản gốc tiếng Anh, cho phép hệ thống cung cấp đồng thời cả hai phiên bản mà không cần gọi thêm request:
 
    { "english\_words": [ {"word": "Good", "start": 0.10, "end": 0.30}, {"word": "morning", "start": 0.31,"end": 0.65}, {"word": "everyone", "start": 0.66, "end": 1.10} ], "vietnamese\_words": [ {"word": "Chào", "start": 0.10, "end": 0.40}, {"word": "buổi", "start": 0.41, "end": 0.62}, {"word": "sáng", "start": 0.63, "end": 0.85}, {"word": "mọi",  "start": 0.86, "end": 1.00}, {"word": "người","start": 1.01, "end": 1.10} ] }
 
@@ -502,7 +503,7 @@ Lưu ý rằng ví dụ này cho ra cùng kết quả với một thuật toán 
 - fix\_cps — Hai chiến lược: (A) extend end nếu còn gap, (B) tách block theo tỷ lệ ký tự nếu A không khả thi. Có deadlock guard: chấp nhận vi phạm và log cảnh báo nếu split tạo block < 1s, để thuật toán luôn kết thúc.
 - fix\_gap — Co prev.end để gap ≥ 83 ms; nếu co làm prev.duration < 1s thì gộp prev với curr thành một block.
   1  ### <a name="_toc231502404"></a>**Xử lý các Edge Cases**
-- **Không phát hiện tiếng nói:** Khi detect\_speech\_segments() trả về danh sách rỗng, thì báo RuntimeError("No speech detected in the video."). Controller bắt ngoại lệ này và đánh dấu job ở trạng thái FAILED, kèm thông điệp người dùng. Trường hợp này thường gặp với video thuần nhạc, video hỏng, hoặc audio bị mất tiếng hoàn toàn. Hướng phát triển tương lai: thêm cơ chế fallback tạo segment phủ toàn bộ thời lượng để tận dụng VAD bỏ sót giọng có âm lượng rất nhỏ.
+- **Không phát hiện tiếng nói:** Khi detect\_speech\_segments() trả về danh sách rỗng, thì báo RuntimeError("No speech detected in the video."). Controller bắt ngoại lệ này và đánh dấu job ở trạng thái ERROR, kèm thông điệp người dùng. Trường hợp này thường gặp với video thuần nhạc, video hỏng, hoặc audio bị mất tiếng hoàn toàn. Hướng phát triển tương lai: thêm cơ chế fallback tạo segment phủ toàn bộ thời lượng để tận dụng VAD bỏ sót giọng có âm lượng rất nhỏ.
 - **Segment cuối ngắn không gộp được:** Khi buffer cuối cùng trong merge\_short\_segments chưa đạt min\_duration mà vòng lặp đã kết thúc không còn segment để gộp tiếp, thuật toán vẫn flush buffer đó ra như cũ — tức là chấp nhận một segment cuối ngắn hơn 2 giây. Điều này tránh việc gây phá vỡ tính tuần tự.
 - **Overlap giữa các block sau tối ưu:** Khi fix\_cps hoặc fix\_duration kéo dài end của block *i* để đáp ứng ràng buộc, nó có thể tiến sát vào start của block *i+1*. Trường hợp này được kiểm soát ngay trong từng hàm: fix\_cps chỉ extend nếu *target\_end* ≤ *next\_start* - *MIN\_GAP*; nếu không thỏa thì chuyển sang chiến lược split. Sau đó fix\_gap chạy ở cuối mỗi vòng để dọn dẹp các gap còn lại.
 - **Tiếng nói chồng nhau:** Hệ thống hiện tại không thực hiện speaker diarization, do đó khi có hai người nói đồng thời, VAD chỉ trả về một segment duy nhất và transcript sẽ trộn lẫn hai luồng nội dung. Đây là hạn chế được thừa nhận; tích hợp pyannote.audio hoặc whisperX để phân biệt người nói là hướng phát triển khả dĩ.
@@ -513,7 +514,7 @@ Lưu ý rằng ví dụ này cho ra cùng kết quả với một thuật toán 
 
         Phân hệ xử lý video và âm thanh  đảm nhận vai trò tiền xử lý toàn bộ: trích xuất audio bằng FFmpeg, chuẩn hóa về định dạng WAV 16 kHz mono, phát hiện vùng có tiếng nói bằng Silero VAD với bộ tham số được tinh chỉnh thực nghiệm, và mã hóa base64 PCM float32 để truyền tải an toàn sang môi trường GPU từ xa. Trong batch mode, phân hệ này chạy hoàn toàn trên backend cục bộ, không phụ thuộc vào kết nối Colab; trong realtime mode, một phần xử lý VAD, được đẩy lên VM2 để giảm độ trễ tổng thể.
 
-        Phân hệ nhận dạng tiếng nói triển khai theo mô hình hai VM chuyên biệt: VM1 phục vụ batch mode với Faster-Whisper large-v3 cho tiếng Anh và PhoWhisper large cho tiếng Việt cùng mô hình dịch VinAI EN→VI; VM2 phục vụ realtime mode với Kyutai stt-1b kết hợp Moshi mimi codec để đạt latency dưới ngưỡng nhận thức của người dùng. Hai giao thức HTTP POST kèm SSE cho streaming và WebSocket được sử dụng tương ứng với từng chế độ, kèm theo cơ chế retry tuyến tính (5 / 10 / 15 s) cho VM1 và auto-reconnect (2 / 5 / 10 s) cho VM2 đảm bảo độ tin cậy.
+        Phân hệ nhận dạng tiếng nói triển khai theo mô hình hai VM chuyên biệt: VM2 phục vụ batch mode với Faster-Whisper large-v3 cho tiếng Anh và PhoWhisper large cho tiếng Việt cùng mô hình dịch VinAI hai chiều EN↔VI, đồng thời đảm nhận luôn realtime tiếng Việt (Silero VAD + PhoWhisper); VM1 phục vụ realtime tiếng Anh với Kyutai stt-1b kết hợp Moshi mimi codec để đạt latency dưới ngưỡng nhận thức của người dùng. Hai giao thức HTTP POST kèm SSE cho batch và WebSocket cho realtime được sử dụng tương ứng với từng chế độ, kèm theo cơ chế retry tuyến tính (5 / 10 / 15 s) cho VM batch và auto-reconnect (2 / 5 / 10 s) cho VM realtime đảm bảo độ tin cậy.
 
         Phân hệ xử lý ngôn ngữ tự nhiên chuyển đổi words có timestamp thành subtitle blocks có thể đọc được, thực hiện phục hồi dấu câu cơ bản, dịch máy EN→VI, và cung cấp hai luồng dữ liệu song song: luồng backend cho export SRT và luồng frontend cho editor tương tác cùng caption overlay kiểu YouTube. Mô-đun subtitle\_optimizer áp dụng pipeline 4 bước lặp đến hội tụ: fix\_duration → fix\_cpl → fix\_cps → fix\_gap để chuẩn hóa phụ đề theo tiêu chuẩn truyền hình/Netflix.
 
@@ -523,7 +524,7 @@ Lưu ý rằng ví dụ này cho ra cùng kết quả với một thuật toán 
      1  ### <a name="_toc231502407"></a>**Đóng góp kỹ thuật**
         Nhìn lại toàn bộ chương 3, hệ thống có ba đóng góp kỹ thuật chính:
 
-        Thứ nhất, kiến trúc pipeline phân tán linh hoạt giữa backend cục bộ và GPU VM từ xa. Thay vì phụ thuộc hoàn toàn vào một môi trường duy nhất, hệ thống phân chia hợp lý: các tác vụ nhẹ FFmpeg, VAD ở batch mode, encode, post-processing SRT chạy trên backend để đảm bảo ổn định; các tác vụ nặng được đẩy ra VM có GPU. Thiết kế này cho phép thay thế hoặc nâng cấp từng thành phần độc lập mà không ảnh hưởng toàn hệ thống — ví dụ thay Faster-Whisper bằng Whisper-v4 chỉ cần cập nhật code trên VM1 mà không phải build lại backend.
+        Thứ nhất, kiến trúc pipeline phân tán linh hoạt giữa backend cục bộ và GPU VM từ xa. Thay vì phụ thuộc hoàn toàn vào một môi trường duy nhất, hệ thống phân chia hợp lý: các tác vụ nhẹ FFmpeg, VAD ở batch mode, encode, post-processing SRT chạy trên backend để đảm bảo ổn định; các tác vụ nặng được đẩy ra VM có GPU. Thiết kế này cho phép thay thế hoặc nâng cấp từng thành phần độc lập mà không ảnh hưởng toàn hệ thống — ví dụ thay Faster-Whisper bằng Whisper-v4 chỉ cần cập nhật code trên VM2 mà không phải build lại backend.
 
         Thứ hai, cơ chế hỗ trợ song song cả batch mode lẫn realtime mode trong cùng một hệ thống. Hai chế độ sử dụng mô hình tự động nhận dạng tiếng nói khác nhau, giao thức khác nhau (HTTP/SSE vs WSS), sample rate khác nhau (16 kHz/32 ms vs 24 kHz/80 ms), và kiến trúc VM khác nhau, nhưng chia sẻ chung tầng tiếp nhận đầu vào (controller, job state machine), tầng NLP post-processing (words\_to\_srt, subtitle\_optimizer), và tầng giao diện editor (wordsToSubtitles, mergeMappedWithDraft). Sự tách biệt này cho phép tối ưu hóa từng chế độ độc lập mà không tạo ra xung đột.
 
