@@ -815,7 +815,6 @@ export function UploadPage() {
                 {[
                   { icon: CheckCircle2, label: isVi ? "Miễn phí để bắt đầu, không cần thẻ" : "Free to start, no credit card" },
                   { icon: Clock, label: isVi ? "Có kết quả trong dưới 2 phút" : "Results in under 2 min" },
-                  { icon: Zap, label: isVi ? "Nhanh hơn thủ công 36 lần" : "36× faster than manual" },
                   { icon: Sparkles, label: isVi ? "Premium chỉ 99k₫/năm" : "Premium at 99k₫/year" },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center gap-2.5">
