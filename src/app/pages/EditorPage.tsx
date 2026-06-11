@@ -814,10 +814,23 @@ export function EditorPage() {
     ? (latestRealtimeSegment?.vi ?? "")
     : textVi;
 
+  // Dual mode: EN partial words về trước, VI dịch chỉ có sau khi segment chốt
+  // (và ngược lại ngay sau flush). Để cả hai dòng không bị nhấp nháy/biến mất,
+  // fallback mỗi bên về segment hoàn tất gần nhất khi live partial của bên đó rỗng.
+  const textEnDual = isLiveStreaming
+    ? (textEnLive || latestRealtimeSegment?.en || textEn)
+    : textEn;
+  const textViDual = isLiveStreaming
+    ? (textViLive || latestRealtimeSegment?.vi || textVi)
+    : textVi;
+
   const subtitleLines = useMemo(() => {
     // Wrap mỗi dòng overlay thành tối đa 2 dòng ≤42 ký tự (CPL chuẩn).
     const en = textEnLive ? wrapToTwoLines(textEnLive) : "";
     const vi = textViLive ? wrapToTwoLines(textViLive) : "";
+    // Dual mode dùng text fallback để cả hai ngôn ngữ luôn hiển thị song song.
+    const enDual = textEnDual ? wrapToTwoLines(textEnDual) : "";
+    const viDual = textViDual ? wrapToTwoLines(textViDual) : "";
     switch (subtitleDisplayMode) {
       case "off":
         return [] as string[];
@@ -826,13 +839,13 @@ export function EditorPage() {
       case "vi-only":
         return vi ? [vi] : [];
       case "dual-vi-top":
-        return [vi, en].filter(Boolean);
+        return [viDual, enDual].filter(Boolean);
       case "dual-en-top":
-        return [en, vi].filter(Boolean);
+        return [enDual, viDual].filter(Boolean);
       default:
         return [] as string[];
     }
-  }, [subtitleDisplayMode, textEnLive, textViLive]);
+  }, [subtitleDisplayMode, textEnLive, textViLive, textEnDual, textViDual]);
 
   const filteredSubtitles = useMemo(
     () => subtitles.filter((s) => s.text.toLowerCase().includes(searchTerm.toLowerCase())),
@@ -1196,8 +1209,10 @@ export function EditorPage() {
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
+              {/* Volume: slider render dạng absolute popover để KHÔNG đẩy các nút
+                  bên cạnh khi hover. Hover-zone chỉ bao quanh nút âm lượng. */}
               <div
-                className="relative flex items-center gap-2"
+                className="relative flex items-center"
                 onMouseEnter={() => setShowVolumeSlider(true)}
                 onMouseLeave={() => setShowVolumeSlider(false)}
               >
@@ -1218,10 +1233,10 @@ export function EditorPage() {
                 <AnimatePresence>
                   {showVolumeSlider && (
                     <motion.div
-                      initial={{ opacity: 0, width: 0 }}
-                      animate={{ opacity: 1, width: 110 }}
-                      exit={{ opacity: 0, width: 0 }}
-                      className="flex items-center gap-2 overflow-hidden"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 shadow-xl z-30"
                     >
                       <input
                         type="range"
@@ -1242,46 +1257,47 @@ export function EditorPage() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
 
-                <div className="relative">
-                  <button
-                    onClick={() => setShowSubtitleMenu((prev) => !prev)}
-                    className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
-                    title="Subtitle options"
-                  >
-                    <FileText className="w-4 h-4" />
-                  </button>
+              {/* Subtitle options: tách hẳn khỏi hover-zone của volume. */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowSubtitleMenu((prev) => !prev)}
+                  className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                  title="Subtitle options"
+                >
+                  <FileText className="w-4 h-4" />
+                </button>
 
-                  <AnimatePresence>
-                    {showSubtitleMenu && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 8 }}
-                        className="absolute bottom-full mb-2 left-0 min-w-[220px] rounded-xl border border-gray-700 bg-gray-900 shadow-xl overflow-hidden z-30"
-                      >
-                        <div className="px-3 py-2 text-[11px] text-gray-400 border-b border-gray-700">
-                          SUBTITLE OPTIONS
-                        </div>
-                        {SUBTITLE_DISPLAY_OPTIONS.map((option) => (
-                          <button
-                            key={option.mode}
-                            onClick={() => {
-                              setSubtitleDisplayMode(option.mode);
-                              setShowSubtitleMenu(false);
-                            }}
-                            className={`w-full text-left px-3 py-2.5 hover:bg-gray-800 transition-colors ${
-                              subtitleDisplayMode === option.mode ? "bg-gray-800/70" : ""
-                            }`}
-                          >
-                            <div className="text-xs text-white">{option.label}</div>
-                            <div className="text-[11px] text-gray-400">{option.description}</div>
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                <AnimatePresence>
+                  {showSubtitleMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      className="absolute bottom-full mb-2 left-0 min-w-[220px] rounded-xl border border-gray-700 bg-gray-900 shadow-xl overflow-hidden z-30"
+                    >
+                      <div className="px-3 py-2 text-[11px] text-gray-400 border-b border-gray-700">
+                        SUBTITLE OPTIONS
+                      </div>
+                      {SUBTITLE_DISPLAY_OPTIONS.map((option) => (
+                        <button
+                          key={option.mode}
+                          onClick={() => {
+                            setSubtitleDisplayMode(option.mode);
+                            setShowSubtitleMenu(false);
+                          }}
+                          className={`w-full text-left px-3 py-2.5 hover:bg-gray-800 transition-colors ${
+                            subtitleDisplayMode === option.mode ? "bg-gray-800/70" : ""
+                          }`}
+                        >
+                          <div className="text-xs text-white">{option.label}</div>
+                          <div className="text-[11px] text-gray-400">{option.description}</div>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               <div
