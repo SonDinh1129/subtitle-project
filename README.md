@@ -132,7 +132,7 @@ subtitle-project/
 
 | Cơ chế | Chi tiết |
 |--------|---------|
-| Đăng ký | Email + mật khẩu, xác nhận tài khoản qua **Magic Link** (`signUp` + `emailRedirectTo=/auth/callback`) — mật khẩu được lưu nên người dùng đăng nhập lại bằng mật khẩu sau khi xác nhận |
+| Đăng ký | Email + mật khẩu, xác nhận tài khoản qua **Magic Link** (`signUp` + `emailRedirectTo=/auth/callback`) — mật khẩu được lưu nên người dùng đăng nhập lại bằng mật khẩu sau khi xác nhận. Màn "Check your email" **poll** `GET /api/auth/confirmation-status` mỗi 5s để phát hiện khi user xác nhận link ở **trình duyệt/thiết bị khác** (implicit flow), rồi chuyển sang màn "Email đã được xác nhận → mời đăng nhập" thay vì kẹt vô hạn |
 | Đăng nhập | Email/mật khẩu (`signInWithPassword`) hoặc **Google OAuth** |
 | Quên mật khẩu | Xác thực **OTP 6 số** gửi về email (`resetPasswordForEmail` → `verifyOtp` → `updateUser`) |
 | Backend validation | JWT HS256 verify với `SUPABASE_JWT_SECRET` |
@@ -671,8 +671,17 @@ const textEnLive = isLiveStreaming
 
 const textViLive = isLiveStreaming ? (latestRealtimeSegment?.vi ?? "") : textVi;
 
+// Dual mode (dual-vi-top / dual-en-top): khi đang stream, partial words EN về
+// trước còn bản dịch VI chỉ có sau khi segment chốt (và ngược lại ngay sau flush),
+// nên một bên thường rỗng → .filter(Boolean) sẽ cắt mất 1 dòng. textEnDual/textViDual
+// fallback mỗi bên về latestRealtimeSegment khi live partial của bên đó rỗng,
+// đảm bảo cả hai ngôn ngữ luôn hiển thị song song.
+const textEnDual = isLiveStreaming ? (textEnLive || latestRealtimeSegment?.en || textEn) : textEn;
+const textViDual = isLiveStreaming ? (textViLive || latestRealtimeSegment?.vi || textVi) : textVi;
+
 // Overlay wrap: mỗi dòng ≤ 42 ký tự, tối đa 2 dòng (wrapToTwoLines)
 // chỉ realtime → sentence mode (progressive bị ẩn ở realtime)
+// dual mode dùng textEnDual/textViDual; single mode dùng textEnLive/textViLive
 ```
 
 **Auto-clear partial words (3s timeout):**
@@ -1227,6 +1236,7 @@ src/app/pages/
 | `getExportStatus(exportId)` / `pollExportUntilDone(exportId, onUpdate?)` | Poll trạng thái export video |
 | `getAuthHeader()` / `authFetch(path, init?)` | Helper gắn JWT cho request backend |
 | `updateProfile(fullName)` / `changePassword(newPassword)` / `deleteAccount()` | Quản lý tài khoản |
+| `getConfirmationStatus(email)` | Public — kiểm tra email đã xác nhận chưa (cho màn "Check your email" poll cross-browser); trả `false` khi lỗi |
 
 ---
 
@@ -1302,8 +1312,9 @@ Colab timeout = 600s (10 phút)
 | POST | `/api/auth/change-password` | Đổi mật khẩu | Required | 10/phút |
 | DELETE | `/api/auth/account` | Xóa tài khoản | Required | 5/giờ |
 | POST | `/api/auth/sse-token` | Cấp token ngắn hạn cho EventSource | Required | 30/phút |
+| GET | `/api/auth/confirmation-status?email=...` | Kiểm tra email đã xác nhận chưa (cho màn "Check your email" poll cross-browser). Không lộ user tồn tại; email lạ/lỗi → `{confirmed:false}` | - | 20/phút |
 
-> Đăng ký / đăng nhập **không có route backend** — xử lý phía client bằng Supabase Auth (`signUp`, `signInWithPassword`, OAuth).
+> Đăng ký / đăng nhập **không có route backend** — xử lý phía client bằng Supabase Auth (`signUp`, `signInWithPassword`, OAuth). Ngoại lệ duy nhất là `confirmation-status` ở trên: endpoint public dùng service-role key đọc `email_confirmed_at` để màn chờ sau đăng ký biết được khi user xác nhận link ở trình duyệt khác.
 
 ### Payment (`/api/payment`)
 

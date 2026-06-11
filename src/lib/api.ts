@@ -464,3 +464,20 @@ export async function deleteAccount(): Promise<Response> {
     method: 'DELETE',
   })
 }
+
+/**
+ * GET /api/auth/confirmation-status?email=...
+ * Public — lets the post-signup "check your email" screen detect when the user
+ * confirmed via the magic link, even if the link was opened in another browser.
+ * Returns false on any error so the caller simply keeps polling.
+ */
+export async function getConfirmationStatus(email: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/auth/confirmation-status?email=${encodeURIComponent(email)}`)
+    if (!res.ok) return false
+    const data = await res.json() as { confirmed?: boolean }
+    return data.confirmed === true
+  } catch {
+    return false
+  }
+}

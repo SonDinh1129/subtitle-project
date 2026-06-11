@@ -139,6 +139,68 @@ def delete_account():
         return jsonify({'error': 'Failed to delete account'}), 500
 
 
+@auth_bp.get('/confirmation-status')
+@limiter.limit("20/minute")
+def confirmation_status():
+    """
+    GET /api/auth/confirmation-status?email=<email>
+
+    Public, unauthenticated endpoint used by the post-signup "check your email"
+    screen to detect when the user has confirmed via the magic link — even when
+    the link is opened in a different browser/device (implicit flow), where the
+    waiting tab otherwise has no way to learn the confirmation happened.
+
+    Returns { "confirmed": bool }. To avoid leaking account existence, it returns
+    { "confirmed": false } for unknown emails and never errors on a missing user.
+    """
+    email = (request.args.get('email') or '').strip().lower()
+    if not email or '@' not in email or len(email) > 254:
+        return jsonify({'error': 'A valid email query param is required'}), 400
+
+    try:
+        supabase = _get_supabase_service()
+        confirmed = _is_email_confirmed(supabase, email)
+        return jsonify({'confirmed': confirmed}), 200
+    except Exception:
+        from flask import current_app
+        current_app.logger.exception("confirmation_status failed")
+        # Fail closed: treat as not-confirmed so the client keeps waiting.
+        return jsonify({'confirmed': False}), 200
+
+
+def _is_email_confirmed(supabase, email: str) -> bool:
+    """Return True iff an auth user with this email has confirmed their address.
+
+    Paginates admin.list_users defensively so the lookup stays correct as the
+    user count grows. Unknown email → False (also avoids leaking existence).
+    The Supabase/gotrue SDK has shifted shapes across versions, so this handles
+    both the paginated-object and bare-list return forms and stops when a page
+    comes back empty or smaller than requested.
+    """
+    per_page = 200
+    for page in range(1, 51):  # hard cap: 10k users — far beyond expected scale
+        try:
+            resp = supabase.auth.admin.list_users(page=page, per_page=per_page)
+        except TypeError:
+            # Older SDK signature without pagination kwargs.
+            resp = supabase.auth.admin.list_users()
+
+        users = getattr(resp, 'users', None)
+        if users is None:
+            users = resp if isinstance(resp, list) else []
+
+        for u in users:
+            u_email = (getattr(u, 'email', None) or '').strip().lower()
+            if u_email == email:
+                return bool(getattr(u, 'email_confirmed_at', None))
+
+        # Stop when there are no more pages to scan.
+        if len(users) < per_page:
+            break
+
+    return False
+
+
 @auth_bp.post('/sse-token')
 @require_auth
 @limiter.limit("30/minute")

@@ -5,6 +5,7 @@ import { Captions, Eye, EyeOff, ArrowRight, CheckCircle2, Mail, RefreshCw } from
 import { AuthRightPanel } from "../components/AuthRightPanel";
 import { useUiPreferences } from "../context/UiPreferencesContext";
 import { supabase, signInWithGoogle } from "../../lib/supabase";
+import { getConfirmationStatus } from "../../lib/api";
 
 const EMAIL_REDIRECT_TO = `${window.location.origin}/auth/callback`;
 
@@ -74,7 +75,7 @@ export function SignUpPage() {
   const [oauthLoading, setOauthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
-  const [step, setStep] = useState<'form' | 'check-email'>('form');
+  const [step, setStep] = useState<'form' | 'check-email' | 'confirmed'>('form');
   const [resendError, setResendError] = useState<string | null>(null);
   const [resendCountdown, setResendCountdown] = useState(0);
   const [errors, setErrors] = useState<{
@@ -91,6 +92,29 @@ export function SignUpPage() {
       if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
     };
   }, []);
+
+  // While on the "check your email" screen, poll the backend so this tab learns
+  // when the user confirms the magic link — even if they opened it in a different
+  // browser/device (implicit flow, where this tab gets no session of its own).
+  useEffect(() => {
+    if (step !== 'check-email' || !email) return;
+    let cancelled = false;
+
+    const check = async () => {
+      const confirmed = await getConfirmationStatus(email);
+      if (!cancelled && confirmed) {
+        if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
+        setStep('confirmed');
+      }
+    };
+
+    check();  // immediate first check
+    const id = setInterval(check, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [step, email]);
 
   const validate = () => {
     const e: typeof errors = {};
@@ -184,6 +208,49 @@ export function SignUpPage() {
       setIsLoading(false);
     }
   };
+
+  if (step === 'confirmed') {
+    return (
+      <div className="min-h-screen flex bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+        <div className="flex-1 flex flex-col justify-center items-center px-6 py-12 lg:max-w-[52%]">
+          <div className="w-full max-w-[420px]">
+            <Link to="/" className="inline-flex items-center gap-2.5 group mb-10">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200">
+                <Captions className="w-4.5 h-4.5 text-white" />
+              </div>
+              <span className="text-gray-900 dark:text-gray-100 tracking-tight">
+                <span className="text-violet-600">Sub</span>AI
+              </span>
+            </Link>
+
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center mb-5">
+                <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+              </div>
+              <h1 className="text-gray-900 dark:text-gray-100 mb-1.5" style={{ fontSize: "1.625rem", fontWeight: 700, lineHeight: 1.25 }}>
+                {isVi ? "Email đã được xác nhận" : "Email confirmed"}
+              </h1>
+              <p className="text-gray-500 mb-6" style={{ fontSize: "0.9375rem", lineHeight: 1.6 }}>
+                {isVi
+                  ? "Tài khoản của bạn đã sẵn sàng. Hãy đăng nhập bằng email và mật khẩu bạn vừa tạo để tiếp tục."
+                  : "Your account is ready. Sign in with the email and password you just created to continue."}
+              </p>
+
+              <Link
+                to="/signin"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md shadow-violet-200"
+                style={{ fontSize: "0.9375rem", fontWeight: 600 }}
+              >
+                {isVi ? "Đến trang đăng nhập" : "Go to sign in"}
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </motion.div>
+          </div>
+        </div>
+        <AuthRightPanel />
+      </div>
+    );
+  }
 
   if (step === 'check-email') {
     return (
