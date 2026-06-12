@@ -247,6 +247,24 @@ export async function getVideoUrl(videoFilename: string): Promise<string> {
   return `${BASE}${path}?token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * Resolve a downloadable, authenticated URL for an exported video.
+ *
+ * The /export-status response returns a relative `download_url` (/api/exports/…)
+ * that points at a @require_auth route. An <a download> click can't send the
+ * Authorization header, so we must (1) prefix BASE so the origin is correct and
+ * (2) carry the token via ?token= (same mechanism /video uses).
+ */
+export async function getExportDownloadUrl(downloadUrl: string): Promise<string> {
+  // Strip a leading "/api" so BASE (which already ends in /api) isn't doubled.
+  const path = downloadUrl.replace(/^\/api/, "");
+  const authHeader = await getAuthHeader();
+  if (!authHeader) return `${BASE}${path}`;
+  const token = authHeader.slice(7); // strip "Bearer "
+  const sep = path.includes("?") ? "&" : "?";
+  return `${BASE}${path}${sep}token=${encodeURIComponent(token)}`;
+}
+
 /** POST /api/auth/sse-token — returns a 60s JWT for EventSource ?token= param. */
 async function getSseToken(): Promise<string> {
   const res = await authFetch('/auth/sse-token', { method: 'POST' })

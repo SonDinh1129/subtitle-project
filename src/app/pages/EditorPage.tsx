@@ -5,6 +5,7 @@ import {
   wordsToSubtitles,
   exportVideo as exportVideoApi,
   pollExportUntilDone,
+  getExportDownloadUrl,
   openRealtimeStream,
   getVideoUrl,
   type Word,
@@ -755,8 +756,11 @@ export function EditorPage() {
       const started = await exportVideoApi(currentJobId, resolution, lang, exportSubtitles);
       const data = await pollExportUntilDone(started.export_id);
       if (!data.download_url || !data.filename) throw new Error("Export completed but download URL is missing");
+      // download_url is a relative @require_auth path; resolve to an absolute,
+      // token-carrying URL so the <a download> click authenticates correctly.
+      const href = await getExportDownloadUrl(data.download_url);
       const a = document.createElement("a");
-      a.href = data.download_url;
+      a.href = href;
       a.download = data.filename;
       document.body.appendChild(a);
       a.click();
