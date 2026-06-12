@@ -14,19 +14,16 @@ import {
 import {
   Play,
   Pause,
-  Download,
   Edit3,
   Type,
   Palette,
   AlignCenter,
   AlignStartVertical,
-  Languages,
   ChevronDown,
   Plus,
   Trash2,
   Clock,
   Check,
-  Sparkles,
   Volume1,
   Volume2,
   VolumeX,
@@ -39,7 +36,6 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  SlidersHorizontal,
 } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 
@@ -79,7 +75,6 @@ const INITIAL_SUBTITLES: Subtitle[] = [
 
 const FONTS = ["Inter", "Roboto", "Arial", "Georgia", "Courier New"];
 const FONT_SIZES = ["Small", "Medium", "Large", "Extra Large"];
-const LANGUAGES = ["English"];
 const EXPORT_RESOLUTIONS: ExportResolution[] = ["360p", "720p", "1080p"];
 const SUBTITLE_DISPLAY_OPTIONS: Array<{ mode: SubtitleDisplayMode; label: string; description: string }> = [
   { mode: "off", label: "Off", description: "No subtitles" },
@@ -313,7 +308,6 @@ export function EditorPage() {
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"style" | "translate" | "settings">("style");
   const [subtitlePosition, setSubtitlePosition] = useState<"bottom" | "top">("bottom");
   const [selectedFont, setSelectedFont] = useState("Inter");
   const [selectedFontSize, setSelectedFontSize] = useState("Medium");
@@ -322,11 +316,7 @@ export function EditorPage() {
   const [bgOpacity, setBgOpacity] = useState(75);
   const [savedMsg, setSavedMsg] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [translateTarget, setTranslateTarget] = useState("Spanish");
-  const [translating, setTranslating] = useState(false);
-  const [translated, setTranslated] = useState(false);
   const [fontDropOpen, setFontDropOpen] = useState(false);
-  const [langDropOpen, setLangDropOpen] = useState(false);
   const videoPlayerRef = useRef<HTMLVideoElement>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoFileName, setVideoFileName] = useState("Untitled video");
@@ -904,14 +894,6 @@ export function EditorPage() {
     }
   };
 
-  const handleTranslate = () => {
-    setTranslating(true);
-    setTimeout(() => {
-      setTranslating(false);
-      setTranslated(true);
-    }, 2500);
-  };
-
   const handleDownloadSRT = () => {
     const content = subtitles
       .map((s, i) => {
@@ -1435,38 +1417,14 @@ export function EditorPage() {
 
         {/* Right: Tools Panel */}
         <div className="w-64 xl:w-72 bg-gray-900 border-l border-gray-800 flex flex-col">
-          {/* Tabs */}
-          <div className="flex border-b border-gray-800">
-            {[
-              { id: "style", icon: Palette, label: "Style" },
-              { id: "translate", icon: Languages, label: "Translate" },
-              { id: "settings", icon: SlidersHorizontal, label: "Settings" },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs transition-all ${
-                  activeTab === tab.id
-                    ? "text-violet-400 border-b-2 border-violet-500"
-                    : "text-gray-500 hover:text-gray-300"
-                }`}
-              >
-                <tab.icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
-            ))}
+          {/* Header */}
+          <div className="flex items-center gap-1.5 border-b border-gray-800 py-3 px-4 text-xs text-violet-400">
+            <Palette className="w-3.5 h-3.5" />
+            Style
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            <AnimatePresence mode="wait">
-              {activeTab === "style" && (
-                <motion.div
-                  key="style"
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
-                  className="space-y-4"
-                >
+            <div className="space-y-4">
                   {/* Position */}
                   <div>
                     <label className="text-xs text-gray-400 mb-2 flex items-center gap-1.5">
@@ -1611,173 +1569,10 @@ export function EditorPage() {
                       </span>
                     </div>
                   </div>
-                </motion.div>
-              )}
-
-              {activeTab === "translate" && (
-                <motion.div
-                  key="translate"
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
-                  className="space-y-4"
-                >
-                  <div>
-                    <label className="text-xs text-gray-400 mb-2 block">Target Language</label>
-                    <div className="relative">
-                      <button
-                        onClick={() => setLangDropOpen(!langDropOpen)}
-                        className="w-full flex items-center justify-between bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-gray-300 hover:border-gray-600 transition-colors"
-                      >
-                        <span>{translateTarget}</span>
-                        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${langDropOpen ? "rotate-180" : ""}`} />
-                      </button>
-                      <AnimatePresence>
-                        {langDropOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, y: -4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -4 }}
-                            className="absolute top-full mt-1 left-0 right-0 bg-gray-800 border border-gray-700 rounded-xl shadow-xl z-20 overflow-hidden"
-                          >
-                            {LANGUAGES.map((lang) => (
-                              <button
-                                key={lang}
-                                onClick={() => { setTranslateTarget(lang); setLangDropOpen(false); }}
-                                className={`w-full text-left px-3 py-2.5 text-sm transition-colors ${
-                                  translateTarget === lang ? "text-violet-400 bg-violet-950/50" : "text-gray-300 hover:bg-gray-700"
-                                }`}
-                              >
-                                {lang}
-                              </button>
-                            ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-800 rounded-xl p-3 space-y-2 text-xs text-gray-400">
-                    <div className="flex items-center gap-2">
-                      <Check className="w-3.5 h-3.5 text-green-400" />
-                      Original language preserved
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Check className="w-3.5 h-3.5 text-green-400" />
-                      Timestamps maintained
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Check className="w-3.5 h-3.5 text-green-400" />
-                      Neural translation engine
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleTranslate}
-                    disabled={translating}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm transition-all ${
-                      translating
-                        ? "bg-gray-700 text-gray-500 cursor-not-allowed"
-                        : translated
-                        ? "bg-green-700 text-white"
-                        : "bg-violet-600 hover:bg-violet-500 text-white"
-                    }`}
-                  >
-                    {translating ? (
-                      <>
-                        <motion.div
-                          animate={{ rotate: 360 }}
-                          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                        >
-                          <Sparkles className="w-4 h-4" />
-                        </motion.div>
-                        Translating...
-                      </>
-                    ) : translated ? (
-                      <>
-                        <Check className="w-4 h-4" />
-                        Translation Complete
-                      </>
-                    ) : (
-                      <>
-                        <Languages className="w-4 h-4" />
-                        Auto Translate to {translateTarget}
-                      </>
-                    )}
-                  </button>
-
-                  {translated && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="bg-green-900/30 border border-green-800 rounded-xl p-3 text-xs text-green-400"
-                    >
-                      Successfully translated {subtitles.length} subtitle blocks to {translateTarget}.
-                    </motion.div>
-                  )}
-                </motion.div>
-              )}
-
-              {activeTab === "settings" && (
-                <motion.div
-                  key="settings"
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
-                  className="space-y-4"
-                >
-                  {[
-                    { label: "Auto-sync subtitles", desc: "Automatically adjust timing" },
-                    { label: "Reading speed limit", desc: "Max 21 chars per second" },
-                    { label: "Spell check", desc: "Highlight misspelled words" },
-                    { label: "Show timestamps", desc: "Display time in editor" },
-                  ].map((setting) => (
-                    <div
-                      key={setting.label}
-                      className="flex items-center justify-between gap-3 py-2 border-b border-gray-800"
-                    >
-                      <div>
-                        <p className="text-sm text-gray-300">{setting.label}</p>
-                        <p className="text-xs text-gray-600">{setting.desc}</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" defaultChecked />
-                        <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600" />
-                      </label>
-                    </div>
-                  ))}
-
-                  {/* Export Options */}
-                  <div>
-                    <p className="text-xs text-gray-400 mb-3">Export</p>
-                    <div className="space-y-2">
-                      {[
-                        { fmt: "SRT", desc: "SubRip Subtitle", icon: FileText },
-                        { fmt: "VTT", desc: "Web Video Text", icon: FileText },
-                        { fmt: "MP4", desc: "Burned-in video", icon: Video },
-                      ].map((exp) => (
-                        <button
-                          key={exp.fmt}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-left transition-colors"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-gray-700 flex items-center justify-center flex-shrink-0">
-                            <exp.icon className="w-4 h-4 text-gray-400" />
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-300">{exp.fmt}</p>
-                            <p className="text-xs text-gray-500">{exp.desc}</p>
-                          </div>
-                          <Download className="w-3.5 h-3.5 text-gray-500 ml-auto" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
   );
 }
