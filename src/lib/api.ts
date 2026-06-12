@@ -159,6 +159,19 @@ export type RealtimeStreamEvent =
 
 export type ExportResolution = "360p" | "720p" | "1080p";
 export type SubtitleLang = "en" | "vi";
+export type ExportLang = "en" | "vi" | "dual";
+
+export interface SrtBlock {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface ExportSubtitlesPayload {
+  en?: SrtBlock[];
+  vi?: SrtBlock[];
+  order?: "vi-en" | "en-vi"; // only used when lang === "dual"
+}
 
 export interface ExportResponse {
   export_id: string;
@@ -338,11 +351,12 @@ export async function getSrtUrl(jobId: string, lang: "en" | "vi"): Promise<strin
 export async function exportVideo(
   jobId: string,
   resolution: ExportResolution,
-  lang: SubtitleLang,
+  lang: ExportLang,
+  subtitles?: ExportSubtitlesPayload,
 ): Promise<ExportResponse> {
   const res = await authFetch(`/export`, {
     method: "POST",
-    body: JSON.stringify({ job_id: jobId, resolution, lang }),
+    body: JSON.stringify({ job_id: jobId, resolution, lang, subtitles }),
   });
   if (!res.ok) {
     const text = await res.text();

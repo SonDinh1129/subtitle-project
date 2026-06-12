@@ -9,6 +9,9 @@ import {
   getVideoUrl,
   type Word,
   type ExportResolution,
+  type ExportLang,
+  type ExportSubtitlesPayload,
+  type SrtBlock,
   type RealtimeStreamEvent,
 } from "../../lib/api";
 import {
@@ -92,6 +95,16 @@ function formatTime(secs: number): string {
   const s = Math.floor(secs % 60);
   const ms = Math.round((secs % 1) * 100);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(2, "0")}`;
+}
+
+// Full SRT timestamp: HH:MM:SS,mmm
+function srtTime(secs: number): string {
+  const t = Number.isFinite(secs) && secs > 0 ? secs : 0;
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = Math.floor(t % 60);
+  const ms = Math.floor((t % 1) * 1000);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
 }
 
 const ARTICLES = new Set(["a", "an", "the"]);
@@ -695,6 +708,35 @@ export function EditorPage() {
     }
   };
 
+  // Map editor subtitle state → SRT blocks the backend can render.
+  const toBlocks = (items: Subtitle[]): SrtBlock[] =>
+    items
+      .filter((s) => s.text.trim().length > 0)
+      .map((s) => ({ start: s.startTime, end: s.endTime, text: s.text }));
+
+  // Translate the current display mode into the export lang + payload so the
+  // exported video / SRT matches exactly what the user selected (VI / EN / Dual).
+  const buildExportArgs = (): { lang: ExportLang; subtitles: ExportSubtitlesPayload } => {
+    const en = toBlocks(englishSubtitles);
+    const vi = toBlocks(vietnameseSubtitles);
+    switch (subtitleDisplayMode) {
+      case "en-only":
+        return { lang: "en", subtitles: { en } };
+      case "vi-only":
+        return { lang: "vi", subtitles: { vi } };
+      case "dual-vi-top":
+        return { lang: "dual", subtitles: { vi, en, order: "vi-en" } };
+      case "dual-en-top":
+        return { lang: "dual", subtitles: { en, vi, order: "en-vi" } };
+      case "off":
+      default:
+        // "off": fall back to the active editing language.
+        return subtitleLang === "vi"
+          ? { lang: "vi", subtitles: { vi } }
+          : { lang: "en", subtitles: { en } };
+    }
+  };
+
   const handleExportVideo = async (resolution: ExportResolution) => {
     if (isRealtimeMode && streamStatus !== "done") {
       setExportError("Realtime is still processing. Please wait until completion.");
@@ -709,7 +751,8 @@ export function EditorPage() {
     setShowExportMenu(false);
     setExportingResolution(resolution);
     try {
-      const started = await exportVideoApi(currentJobId, resolution, subtitleLang);
+      const { lang, subtitles: exportSubtitles } = buildExportArgs();
+      const started = await exportVideoApi(currentJobId, resolution, lang, exportSubtitles);
       const data = await pollExportUntilDone(started.export_id);
       if (!data.download_url || !data.filename) throw new Error("Export completed but download URL is missing");
       const a = document.createElement("a");
@@ -894,20 +937,74 @@ export function EditorPage() {
     }
   };
 
-  const handleDownloadSRT = () => {
-    const content = subtitles
-      .map((s, i) => {
-        const start = formatTime(s.startTime).replace(".", ",");
-        const end = formatTime(s.endTime).replace(".", ",");
-        return `${i + 1}\n00:${start} --> 00:${end}\n${s.text}\n`;
-      })
+  // Build a single-language SRT cue list from blocks.
+  const srtFromBlocks = (blocks: SrtBlock[]): string =>
+    blocks
+      .filter((b) => b.text.trim().length > 0)
+      .map((b, i) => `${i + 1}\n${srtTime(b.start)} --> ${srtTime(b.end)}\n${b.text.trim()}\n`)
       .join("\n");
+
+  // Build a 2-line dual SRT: `top` is the anchor timeline; each cue's bottom
+  // line is the `bottom` block with the largest time overlap (mirrors backend).
+  const dualSrtFromBlocks = (top: SrtBlock[], bottom: SrtBlock[]): string => {
+    const bestOverlap = (start: number, end: number): string => {
+      let text = "";
+      let max = 0;
+      for (const o of bottom) {
+        const ov = Math.min(end, o.end) - Math.max(start, o.start);
+        if (ov > max) {
+          max = ov;
+          text = o.text.trim();
+        }
+      }
+      return text;
+    };
+    let idx = 1;
+    const cues: string[] = [];
+    for (const b of top) {
+      const topText = b.text.trim();
+      const bottomText = bestOverlap(b.start, b.end);
+      const cue = bottomText ? `${topText}\n${bottomText}` : topText;
+      if (!cue.trim()) continue;
+      cues.push(`${idx}\n${srtTime(b.start)} --> ${srtTime(b.end)}\n${cue}\n`);
+      idx += 1;
+    }
+    return cues.join("\n");
+  };
+
+  const handleDownloadSRT = () => {
+    const en = toBlocks(englishSubtitles);
+    const vi = toBlocks(vietnameseSubtitles);
+    let content: string;
+    let suffix: string;
+    switch (subtitleDisplayMode) {
+      case "en-only":
+        content = srtFromBlocks(en);
+        suffix = "en";
+        break;
+      case "vi-only":
+        content = srtFromBlocks(vi);
+        suffix = "vi";
+        break;
+      case "dual-vi-top":
+        content = dualSrtFromBlocks(vi, en);
+        suffix = "dual";
+        break;
+      case "dual-en-top":
+        content = dualSrtFromBlocks(en, vi);
+        suffix = "dual";
+        break;
+      default:
+        content = srtFromBlocks(subtitleLang === "vi" ? vi : en);
+        suffix = subtitleLang;
+    }
     const blob = new Blob([content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "subtitles.srt";
+    a.download = `subtitles_${suffix}.srt`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   const safeDuration = totalDuration > 0 ? totalDuration : 1;
