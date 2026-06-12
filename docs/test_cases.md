@@ -147,6 +147,49 @@ Tài liệu trình bày các trường hợp kiểm thử (test case) thủ côn
 >
 > **Chuẩn bị:** 2 tài khoản A và B. Đăng nhập từng tài khoản lấy `access_token` (qua Supabase, xem mục 13.2 của README). Tạo trước 1 job thuộc **A** (`JOB_A`) và 1 export thuộc A (`EXPORT_A`). Dùng `TOKEN_A`, `TOKEN_B`.
 
+### 6.0 Cách gọi API nhạy cảm (lệnh curl mẫu)
+
+> Các test case 6.1–6.4 chỉ mô tả request bằng lời. Mục này cung cấp **lệnh `curl` chạy ngay** cho từng endpoint nhạy cảm. Tất cả endpoint dưới đây có decorator `@require_auth` (một số thêm `@require_premium` hoặc rate-limit), đều nằm dưới prefix `/api`.
+
+**Lấy access token (chạy ở Console trình duyệt sau khi đăng nhập):**
+```js
+// Dán vào DevTools Console của tab đã đăng nhập (localhost:5173)
+const { data } = await window.supabase.auth.getSession();
+console.log(data.session.access_token);   // copy chuỗi này làm $TOKEN
+```
+
+**Đặt biến môi trường (PowerShell):**
+```powershell
+$BASE   = "http://localhost:5000/api"
+$TOKEN_A = "eyJ...A"      # access_token của tài khoản A
+$TOKEN_B = "eyJ...B"      # access_token của tài khoản B
+$JOB_A   = "<job_id-của-A>"
+$EXPORT_A = "<export_id-của-A>"
+```
+
+**Cách truyền token:** header `Authorization: Bearer <token>` cho mọi request; riêng SSE (`/stream`) và tải file qua trình duyệt có thể dùng `?token=<token>` vì không gửi được header.
+
+| Endpoint nhạy cảm | Method | Auth | Lệnh curl mẫu (PowerShell) |
+|---|---|---|---|
+| Xem job | `/jobs/<job_id>` | `@require_auth` | `curl -H "Authorization: Bearer $TOKEN_A" "$BASE/jobs/$JOB_A"` |
+| Stream Realtime (SSE) | `/jobs/<job_id>/stream` | `@require_auth` | `curl -N "$BASE/jobs/$JOB_A/stream?token=$TOKEN_A"` |
+| Lấy URL file SRT | `/jobs/<job_id>/srt-url?lang=vi` | `@require_auth` | `curl -H "Authorization: Bearer $TOKEN_A" "$BASE/jobs/$JOB_A/srt-url?lang=vi"` |
+| **Quality report (CPS/CPL/Gap)** | `/jobs/<job_id>/report?lang=vi&srt=original` | `@require_auth` | `curl -H "Authorization: Bearer $TOKEN_A" "$BASE/jobs/$JOB_A/report?lang=vi&srt=original"` |
+| **Translation quality (LLM)** | `/jobs/<job_id>/translation-quality?model=gpt-4o-mini` | `@require_auth` + `10/phút` | `curl -H "Authorization: Bearer $TOKEN_A" "$BASE/jobs/$JOB_A/translation-quality?model=gpt-4o-mini"` |
+| Optimize phụ đề | `/jobs/<job_id>/optimize` | `@require_auth` + `@require_premium` | `curl -X POST -H "Authorization: Bearer $TOKEN_A" "$BASE/jobs/$JOB_A/optimize"` |
+| Xuất video | `/export` | `@require_auth` + `10/phút` | `curl -X POST -H "Authorization: Bearer $TOKEN_A" -H "Content-Type: application/json" -d '{\"job_id\":\"'$JOB_A'\",\"resolution\":\"720p\",\"lang\":\"vi\"}' "$BASE/export"` |
+| Trạng thái export | `/export-status/<export_id>` | `@require_auth` | `curl -H "Authorization: Bearer $TOKEN_A" "$BASE/export-status/$EXPORT_A"` |
+| Tải video gốc | `/video/<filename>` | `@require_auth` | `curl -H "Authorization: Bearer $TOKEN_A" "$BASE/video/${JOB_A}_input.mp4" -o out.mp4` |
+| Tải video export | `/exports/<filename>` | `@require_auth` | `curl -H "Authorization: Bearer $TOKEN_A" "$BASE/exports/${JOB_A}_vi_720p.mp4" -o export.mp4` |
+| Upload (Normal/Realtime) | `/upload` | `@require_auth` + `5/phút` | `curl -X POST -H "Authorization: Bearer $TOKEN_A" -F "file=@video.mp4" -F "lang=en" -F "process_mode=normal" "$BASE/upload"` |
+| Tạo đơn thanh toán | `/payment/create-order` | `@require_auth` + `3/phút` | `curl -X POST -H "Authorization: Bearer $TOKEN_A" "$BASE/payment/create-order"` |
+
+> **Để kiểm thử IDOR (mục 6.2):** lấy đúng lệnh ở trên nhưng **thay `$TOKEN_A` bằng `$TOKEN_B`** → kỳ vọng nhận **403 `Forbidden`**.
+>
+> **Để kiểm thử thiếu/sai token (mục 6.1):** bỏ hẳn header `Authorization` → **401 `Authentication required`**; hoặc dùng `Authorization: Bearer abc.def.ghi` → **401 `Invalid token`**.
+>
+> **Lưu ý lỗi 503 ở translation-quality:** cần env `OPENAI_API_KEY` được set trong `.env` và restart backend; nếu chưa set sẽ trả **503 `OPENAI_API_KEY ... is not set`** (không liên quan tới phân quyền).
+
 ### 6.1 Xác thực token (Authentication)
 
 | ID | Mô tả | Tiền điều kiện | Các bước | Kết quả mong đợi | KQ thực tế | P/F |
