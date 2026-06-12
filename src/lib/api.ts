@@ -248,21 +248,34 @@ export async function getVideoUrl(videoFilename: string): Promise<string> {
 }
 
 /**
- * Resolve a downloadable, authenticated URL for an exported video.
+ * Download an exported video to disk via fetch → blob, the same mechanism the
+ * SRT download uses successfully.
  *
- * The /export-status response returns a relative `download_url` (/api/exports/…)
- * that points at a @require_auth route. An <a download> click can't send the
- * Authorization header, so we must (1) prefix BASE so the origin is correct and
- * (2) carry the token via ?token= (same mechanism /video uses).
+ * Why not `<a href=server-url download>`: the /api/exports/<file> route is
+ * @require_auth. A plain anchor click can't send the Authorization header, and
+ * an absolute http(s) URL makes the browser treat the navigation as cross-origin
+ * — Chrome then ignores the `download` attribute, so the file never lands in the
+ * downloads folder ("file not found" in the download manager). Fetching the
+ * bytes with the Bearer header and saving an object URL sidesteps both issues.
  */
-export async function getExportDownloadUrl(downloadUrl: string): Promise<string> {
-  // Strip a leading "/api" so BASE (which already ends in /api) isn't doubled.
+export async function downloadExport(downloadUrl: string, filename: string): Promise<void> {
+  // download_url is a relative "/api/exports/<file>"; strip the leading "/api"
+  // because BASE already ends in /api.
   const path = downloadUrl.replace(/^\/api/, "");
-  const authHeader = await getAuthHeader();
-  if (!authHeader) return `${BASE}${path}`;
-  const token = authHeader.slice(7); // strip "Bearer "
-  const sep = path.includes("?") ? "&" : "?";
-  return `${BASE}${path}${sep}token=${encodeURIComponent(token)}`;
+  const res = await authFetch(path);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Download failed (${res.status}): ${text || res.statusText}`);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 /** POST /api/auth/sse-token — returns a 60s JWT for EventSource ?token= param. */

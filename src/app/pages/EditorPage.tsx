@@ -5,7 +5,7 @@ import {
   wordsToSubtitles,
   exportVideo as exportVideoApi,
   pollExportUntilDone,
-  getExportDownloadUrl,
+  downloadExport,
   openRealtimeStream,
   getVideoUrl,
   type Word,
@@ -756,15 +756,10 @@ export function EditorPage() {
       const started = await exportVideoApi(currentJobId, resolution, lang, exportSubtitles);
       const data = await pollExportUntilDone(started.export_id);
       if (!data.download_url || !data.filename) throw new Error("Export completed but download URL is missing");
-      // download_url is a relative @require_auth path; resolve to an absolute,
-      // token-carrying URL so the <a download> click authenticates correctly.
-      const href = await getExportDownloadUrl(data.download_url);
-      const a = document.createElement("a");
-      a.href = href;
-      a.download = data.filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      // Fetch the bytes with auth and save via blob (same path the SRT download
+      // uses) — a plain <a> to the @require_auth /exports route can't carry the
+      // token and won't save the file.
+      await downloadExport(data.download_url, data.filename);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Export failed";
       setExportError(message);
