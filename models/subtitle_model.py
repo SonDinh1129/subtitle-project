@@ -27,6 +27,14 @@ import websocket as _ws_lib
 import asyncio
 import websockets
 
+from models.srt_format import (
+    fmt_srt_time,
+    parse_srt_time as _parse_srt_time,
+    blocks_to_srt_string,
+    dual_blocks_to_srt_string,
+    srt_string_to_blocks as _srt_string_to_blocks,
+)
+
 
 # ─────────────────────────────────────────────────────────────────
 # PATHS
@@ -690,12 +698,7 @@ def encode_segments_for_colab(
 # SRT GENERATION
 # ─────────────────────────────────────────────────────────────────
 
-def _fmt_srt_time(seconds: float) -> str:
-    h  = int(seconds // 3600)
-    m  = int((seconds % 3600) // 60)
-    s  = int(seconds % 60)
-    ms = int((seconds % 1) * 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+_fmt_srt_time = fmt_srt_time
 
 
 def words_to_srt_string(words: list[dict], max_chars: int = 42) -> str:
@@ -735,8 +738,64 @@ def save_srt(content: str, path: str) -> str:
     return path
 
 
-def export_burned_video(job: dict, resolution: str, lang: str) -> str:
-    """Burn subtitles into source video and scale to target resolution."""
+def _resolve_export_srt(job: dict, lang: str, subtitles: Optional[dict]) -> str:
+    """
+    Return a local SRT path to burn. Prefers user-edited `subtitles` (writing a
+    fresh SRT), else falls back to the on-disk SRT, regenerating it from job
+    words when the file is missing (e.g. after a server restart).
+    """
+    job_id = job["job_id"]
+
+    # 1) Edited blocks from the client → authoritative.
+    if subtitles:
+        if lang == "dual":
+            order = subtitles.get("order", "vi-en")
+            vi = subtitles.get("vi") or []
+            en = subtitles.get("en") or []
+            top, bottom = (vi, en) if order == "vi-en" else (en, vi)
+            content = dual_blocks_to_srt_string(top, bottom)
+        else:
+            blocks = subtitles.get(lang) or []
+            content = blocks_to_srt_string(blocks)
+        if content.strip():
+            srt_path = str(OUTPUT_DIR / f"{job_id}_{lang}_edited.srt")
+            return save_srt(content, srt_path)
+
+    # 2) Fallback: on-disk SRT, regenerating from words if absent.
+    if lang == "dual":
+        vi_words = job.get("vietnamese_words") or []
+        en_words = job.get("english_words") or []
+        if not vi_words and not en_words:
+            raise FileNotFoundError("Subtitle data not found")
+        # Reuse word-based SRT then merge into a 2-line cue via simple grouping.
+        vi_blocks = _srt_string_to_blocks(words_to_srt_string(vi_words)) if vi_words else []
+        en_blocks = _srt_string_to_blocks(words_to_srt_string(en_words)) if en_words else []
+        content = dual_blocks_to_srt_string(vi_blocks, en_blocks)
+        srt_path = str(OUTPUT_DIR / f"{job_id}_dual.srt")
+        return save_srt(content, srt_path)
+
+    srt_path = str(OUTPUT_DIR / f"{job_id}_{lang}.srt")
+    if not os.path.exists(srt_path):
+        words = job.get("vietnamese_words" if lang == "vi" else "english_words") or []
+        if not words:
+            raise FileNotFoundError("Subtitle file not found")
+        save_srt(words_to_srt_string(words), srt_path)
+    return srt_path
+
+
+def export_burned_video(
+    job: dict, resolution: str, lang: str, subtitles: Optional[dict] = None
+) -> str:
+    """
+    Burn subtitles into source video and scale to target resolution.
+
+    `subtitles`, when provided, carries the user's edited blocks so the burned
+    video reflects edits (and never depends on a stale on-disk SRT):
+      single: {"en": [...]} or {"vi": [...]}
+      dual:   {"en": [...], "vi": [...], "order": "vi-en"|"en-vi"}
+    Each block is {"start", "end", "text"}. Falls back to the original on-disk
+    SRT (regenerating from job words if missing) when `subtitles` is absent.
+    """
     resolution_map = {
         "360p": "640:360",
         "720p": "1280:720",
@@ -744,17 +803,14 @@ def export_burned_video(job: dict, resolution: str, lang: str) -> str:
     }
     if resolution not in resolution_map:
         raise ValueError("resolution must be one of: 360p, 720p, 1080p")
-    if lang not in ("en", "vi"):
-        raise ValueError("lang must be 'en' or 'vi'")
+    if lang not in ("en", "vi", "dual"):
+        raise ValueError("lang must be 'en', 'vi' or 'dual'")
 
     video_path = job.get("video_path")
     if not video_path or not os.path.exists(video_path):
         raise FileNotFoundError("Source video not found")
 
-    # Construct local SRT path from job_id (video_path is local-only, not in DB)
-    srt_path = str(OUTPUT_DIR / f"{job['job_id']}_{lang}.srt")
-    if not os.path.exists(srt_path):
-        raise FileNotFoundError("Subtitle file not found")
+    srt_path = _resolve_export_srt(job, lang, subtitles)
 
     scale = resolution_map[resolution]
     safe_srt = Path(srt_path).as_posix().replace(":", "\\:")

@@ -390,13 +390,16 @@ def export_video():
     job_id = payload.get("job_id", "")
     resolution = payload.get("resolution", "720p")
     lang = payload.get("lang", "vi")
+    subtitles = payload.get("subtitles")  # optional: user-edited blocks
 
     if not job_id:
         return jsonify({"error": "job_id is required"}), 400
     if resolution not in ("360p", "720p", "1080p"):
         return jsonify({"error": "resolution must be one of: 360p, 720p, 1080p"}), 400
-    if lang not in ("en", "vi"):
-        return jsonify({"error": "lang must be 'en' or 'vi'"}), 400
+    if lang not in ("en", "vi", "dual"):
+        return jsonify({"error": "lang must be 'en', 'vi' or 'dual'"}), 400
+    if subtitles is not None and not isinstance(subtitles, dict):
+        return jsonify({"error": "subtitles must be an object"}), 400
 
     job = get_job(job_id)
     if not job:
@@ -413,10 +416,10 @@ def export_video():
         _export_timestamps[export_id] = _t.monotonic()
         _evict_stale_exports()
 
-    def _run(app, eid, j, res, lng):
+    def _run(app, eid, j, res, lng, subs):
         with app.app_context():
             try:
-                output_path = export_burned_video(j, resolution=res, lang=lng)
+                output_path = export_burned_video(j, resolution=res, lang=lng, subtitles=subs)
                 filename = Path(output_path).name
                 with _exports_lock:
                     _exports[eid].update({"status": "done", "filename": filename})
@@ -427,7 +430,7 @@ def export_video():
 
     threading.Thread(
         target=_run,
-        args=(current_app._get_current_object(), export_id, job, resolution, lang),
+        args=(current_app._get_current_object(), export_id, job, resolution, lang, subtitles),
         daemon=True,
     ).start()
 
