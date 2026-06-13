@@ -4,6 +4,7 @@ app.py — Entry Point (MVC)
 Khởi động Flask app, load VAD, đăng ký controller blueprint.
 """
 
+import logging
 import os
 from flask import Flask, send_from_directory
 from flask_cors import CORS
@@ -50,6 +51,12 @@ def _resolve_colab_realtime_url() -> str:
 # ─────────────────────────────────────────────────────────────────
 
 def create_app() -> Flask:
+    # ── Logging (so logger.info from controllers is visible) ──────
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
     app = Flask(
         __name__,
         static_folder="views/static",

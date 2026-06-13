@@ -62,11 +62,13 @@ def create_order():
     ipn_url      = f"{ngrok_url}/api/payment/ipn"
     order_info   = "SubAI Premium (1 year)"
 
+    logger.info("[CREATE] redirect_url=%s ipn_url=%s", redirect_url, ipn_url)
     try:
         momo_resp, order_id = create_momo_payment(amount, order_info, redirect_url, ipn_url)
     except requests.RequestException as exc:
         return jsonify({"error": f"MoMo request failed: {exc}"}), 502
 
+    logger.info("[CREATE] MoMo response: %s", momo_resp)
     result_code = momo_resp.get("resultCode", -1)
     if result_code != 0:
         return jsonify({"error": momo_resp.get("message", "MoMo error")}), 502
