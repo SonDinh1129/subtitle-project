@@ -45,13 +45,20 @@ def create_order():
     access_key   = os.environ.get("MOMO_ACCESS_KEY", "")
     secret_key   = os.environ.get("MOMO_SECRET_KEY", "")
     ngrok_url    = os.environ.get("NGROK_URL", "").rstrip("/")
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    # MoMo must redirect the browser to a PUBLICLY reachable URL — localhost
+    # won't work. Prefer PUBLIC_URL, fall back to NGROK_URL (the tunnel that
+    # also serves the Flask-built frontend), then the first FRONTEND_URL origin.
+    public_url   = (
+        os.environ.get("PUBLIC_URL", "").rstrip("/")
+        or ngrok_url
+        or os.environ.get("FRONTEND_URL", "http://localhost:5173").split(",")[0].strip().rstrip("/")
+    )
 
     if not all([partner_code, access_key, secret_key, ngrok_url]):
         return jsonify({"error": "MoMo not configured"}), 503
 
     amount       = 99000
-    redirect_url = f"{frontend_url}/upgrade/success"
+    redirect_url = f"{public_url}/upgrade/success"
     ipn_url      = f"{ngrok_url}/api/payment/ipn"
     order_info   = "SubAI Premium (1 year)"
 

@@ -84,8 +84,11 @@ def create_app() -> Flask:
     )
 
     # ── CORS (allow React dev server) ─────────────────────────────
+    # FRONTEND_URL may be a comma-separated list of allowed origins
+    # (e.g. "http://localhost:5000,https://xxx.ngrok-free.dev").
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    CORS(app, resources={r"/api/*": {"origins": frontend_url}})
+    origins = [o.strip() for o in frontend_url.split(",") if o.strip()]
+    CORS(app, resources={r"/api/*": {"origins": origins}})
 
     # ── Rate Limiter ──────────────────────────────────────────────
     limiter.init_app(app)
